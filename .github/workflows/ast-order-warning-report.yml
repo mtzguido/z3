@@ -62,12 +62,16 @@ jobs:
           python3 -m unittest discover -s tooling/scripts/clang-tidy/tests -p 'test_*.py'
           node --test tooling/scripts/clang-tidy/tests/comment.test.js
 
-      - name: Prepare Z3 and its compilation database
+      - name: Generate sources and the compilation database
         run: |
           cmake -G Ninja -S source -B build \
             -DCMAKE_CXX_COMPILER=clang++-21 \
-            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-          cmake --build build --target shell --parallel 2
+            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_ADD_CUSTOM_COMMAND_DEPENDS_EXPLICIT_ONLY=ON
+          # These Python generators declare all their inputs. Avoid CMake's
+          # implicit component dependencies: clang-tidy needs no Z3 objects.
+          cmake --build build --parallel 2 --target \
+            src/api/api_log_macros.h src/ast/pattern/database.h
 
       - name: Report AST argument-order warnings
         run: |

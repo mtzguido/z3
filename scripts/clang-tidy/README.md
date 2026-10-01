@@ -17,7 +17,8 @@ the exported diagnostics contain no replacements. The runner has no fix option.
 
 Use LLVM/Clang **21.1.8**, with clang-tidy and the LLVM/Clang development packages
 from the same installation. A plugin must match the clang-tidy binary loading it.
-This tooling is independent of the compiler used for normal Z3 builds.
+This tooling is independent of the compiler used for normal Z3 builds. The
+generation-only commands below require CMake 3.27 or newer and Ninja.
 
 ```sh
 cmake -G Ninja -S scripts/clang-tidy -B build-tidy \
@@ -30,15 +31,20 @@ ctest --test-dir build-tidy --output-on-failure
 
 cmake -G Ninja -S . -B build \
   -DCMAKE_CXX_COMPILER=clang++-21 \
-  -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-cmake --build build --target shell
+  -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+  -DCMAKE_ADD_CUSTOM_COMMAND_DEPENDS_EXPLICIT_ONLY=ON
+cmake --build build --target src/api/api_log_macros.h src/ast/pattern/database.h
 python3 scripts/clang-tidy/run.py \
   --plugin build-tidy/Z3TidyModule.so --build build --source-root . --output ast-order-report
 ```
 
-Building Z3 first produces the generated headers required to parse it. The runner
-checks source files in the compilation database, retaining individual logs and
-deduplicating header warnings in `warnings.txt` and `summary.json`. Use `--filter`
+Only the checker plugin is compiled. Z3's generated headers and sources are
+produced by Python generators; Z3 itself is neither compiled nor linked.
+[CMAKE_ADD_CUSTOM_COMMAND_DEPENDS_EXPLICIT_ONLY](https://cmake.org/cmake/help/latest/variable/CMAKE_ADD_CUSTOM_COMMAND_DEPENDS_EXPLICIT_ONLY.html)
+prevents CMake from pulling
+unneeded component builds into these generators, whose inputs are fully declared.
+The runner checks source files in the compilation database, retaining individual
+logs and deduplicating header warnings in `warnings.txt` and `summary.json`. Use `--filter`
 to select paths and `--jobs` to control parallelism. Warnings do not fail the run;
 compiler errors, plugin failures, and checker-test failures do.
 The runner prints the final warning count and records `warning_count` and
