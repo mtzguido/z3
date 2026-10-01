@@ -76,10 +76,12 @@ The job log and Actions summary show, for example:
 Base: 46 → PR: 45; change: -1
 ```
 
-The summary includes changed per-file counts and the tested revisions. Header
-diagnostics are deduplicated across translation units. File counts avoid treating
-line-number shifts as added/removed warnings, but do not identify individual new
-or resolved diagnostics. Full logs and warning lists remain in run artifacts for
+The summary includes changed per-file counts, the tested revisions, and a collapsed
+warning diff with `-` lines for removed warnings and `+` lines for added warnings.
+Header diagnostics are deduplicated across translation units. Comparing the source
+checkouts matches diagnostics on unchanged lines, so shifted line numbers do not
+appear as warning changes. Large diffs are shortened in the comment; the comparison
+artifact includes every changed diagnostic. Full logs and warning lists remain in run artifacts for
 14 days. An incomplete scan fails the job and cannot produce a warning delta.
 Warnings themselves remain advisory, and no automatic fixes are offered or applied.
 
@@ -103,7 +105,8 @@ same plugin, then:
 ```sh
 python3 scripts/clang-tidy/compare.py \
   --base base-report/summary.json --head head-report/summary.json \
-  --base-sha "$base_commit" --head-sha "$head_commit" --output comparison
+  --base-sha "$base_commit" --head-sha "$head_commit" \
+  --base-source /path/to/base --head-source /path/to/head --output comparison
 node scripts/clang-tidy/comment.js comparison/comparison.json
 ```
 

@@ -142,3 +142,47 @@ test('render increased, unchanged and scheduled counts; escape contributor paths
     assert.ok(render(many).length < 65536, 'comment must fit the GitHub API size limit');
     assert.match(render(many), /Showing 30 of 40/);
 });
+
+const warning = (line, message = 'allocating arguments') => ({file: 'src/test.cpp', line, column: 5, message});
+
+test('render a collapsed diff with actual removed warnings', t => {
+    const value = {...report(), warning_diff: {removed: [warning(10), warning(20)], added: []}};
+    const text = render(readReport(fixture(t, value).file));
+    assert.match(text, /<details>\n<summary>Warning diff<\/summary>\n\n```diff\n- src\/test.cpp:10:5: warning: allocating arguments/);
+    assert.match(text, /\n- src\/test.cpp:20:5:/);
+    assert.match(text, /```\n\n<\/details>/);
+    assert.doesNotMatch(text, /not confirmed bugs|^\+ /m);
+});
+
+test('show warning replacements even when the total count stays the same', t => {
+    const value = {...report(), head_count: 5, files: [],
+        warning_diff: {removed: [warning(10)], added: [warning(30)]}};
+    const text = render(readReport(fixture(t, value).file));
+    assert.match(text, /change: \*\*\+0\*\*/);
+    assert.match(text, /^- src\/test.cpp:10:5:/m);
+    assert.match(text, /^\+ src\/test.cpp:30:5:/m);
+    value.warning_diff = {removed: [], added: []};
+    assert.match(render(readReport(fixture(t, value).file)), /No warning changes/);
+});
+
+test('reject inconsistent diffs and multiline or invalid diagnostic fields', t => {
+    for (const diff of [null, {removed: [], added: []}, {removed: [warning(10), warning(10)], added: []},
+                        {removed: [warning(10)], added: 'bad'},
+                        ...[{file: '../outside'}, {line: 0}, {column: '5'}, {message: 'bad\n```'},
+                            {message: 'x'.repeat(4097)}, {file: 'src/other.cpp'}].map(patch => ({
+                                removed: [warning(10), {...warning(20), ...patch}], added: []}))]) {
+        assert.throws(() => readReport(fixture(t, {...report(), warning_diff: diff}).file));
+    }
+});
+
+test('keep diff contents inside the code block and bound large comments', t => {
+    const value = {...report(), head_count: 0, base_count: 200,
+        files: [{path: 'src/test.cpp', base: 200, head: 0}],
+        warning_diff: {removed: Array.from({length: 200}, (_, i) => warning(i + 1, '``` </details> @everyone '.repeat(30))), added: []}};
+    const text = render(readReport(fixture(t, value).file));
+    assert.equal((text.match(/^```diff$/gm) || []).length, 1);
+    assert.equal((text.match(/^```$/gm) || []).length, 1);
+    assert.equal((text.match(/^<\/details>$/gm) || []).length, 1);
+    assert.match(text, /Showing \d+ of 200 warning changes/);
+    assert.ok(text.length < 65536);
+});

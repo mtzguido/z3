@@ -53,6 +53,33 @@ class Reports(unittest.TestCase):
         result = comparison.compare(base, head, BASE, HEAD)
         self.assertEqual(result['base_count'], result['head_count'])
         self.assertEqual(2, len(result['files']))
+        self.assertEqual([warning('src/old.cpp')], result['warning_diff']['removed'])
+        self.assertEqual([warning('src/new.cpp')], result['warning_diff']['added'])
+
+    def test_warning_diff_matches_shifted_lines_but_keeps_replaced_warnings(self):
+        before, after = self.root / 'before', self.root / 'after'
+        for root in [before, after]:
+            (root / 'src').mkdir(parents=True)
+        (before / 'src/test.cpp').write_text('drop();\nkeep();\n')
+        (after / 'src/test.cpp').write_text('// added line\n// another line\nkeep();\nadded();\n')
+        base = self.summary('base.json', [warning('src/test.cpp', 1), warning('src/test.cpp', 2)] * 2)
+        head = self.summary('head.json', [warning('src/test.cpp', 3), warning('src/test.cpp', 4)])
+        result = comparison.compare(base, head, BASE, HEAD, base_source=before, head_source=after)
+        self.assertEqual([], result['files'])
+        self.assertEqual({'removed': [warning('src/test.cpp', 1)], 'added': [warning('src/test.cpp', 4)]},
+                         result['warning_diff'])
+
+    def test_warning_diff_handles_added_and_deleted_files(self):
+        before, after = self.root / 'before', self.root / 'after'
+        for root in [before, after]:
+            (root / 'src').mkdir(parents=True)
+        (before / 'src/old.cpp').write_text('old();\n')
+        (after / 'src/new.cpp').write_text('new();\n')
+        base = self.summary('base.json', [warning('src/old.cpp')])
+        head = self.summary('head.json', [warning('src/new.cpp')])
+        result = comparison.compare(base, head, BASE, HEAD, base_source=before, head_source=after)
+        self.assertEqual({'removed': [warning('src/old.cpp')], 'added': [warning('src/new.cpp')]},
+                         result['warning_diff'])
 
     def test_reject_incomplete_scan_and_version_mismatch(self):
         head = self.summary('head.json', [])

@@ -8,6 +8,8 @@ const SHA = /^[0-9a-f]{40}$/;
 const count = n => Number.isSafeInteger(n) && n >= 0 && n <= 10000000;
 const signed = n => n >= 0 ? `+${n}` : `${n}`;
 const escape = s => s.replace(/[&<>@`|\\[\]*_]/g, c => `&#${c.charCodeAt(0)};`);
+const relativePath = p => typeof p === 'string' && p.length > 0 && p.length <= 1024 &&
+    !p.startsWith('/') && !p.split('/').includes('..') && !/[\x00-\x1f\x7f]/.test(p);
 
 function readReport(file) {
     const stat = fs.lstatSync(file);
@@ -20,8 +22,7 @@ function readReport(file) {
     }
     const paths = new Set();
     for (const f of r.files) {
-        if (typeof f.path !== 'string' || !f.path || f.path.length > 1024 ||
-            f.path.startsWith('/') || f.path.split('/').includes('..') || /[\x00-\x1f\x7f]/.test(f.path) ||
+        if (!relativePath(f.path) ||
             paths.has(f.path) || !count(f.base) || !count(f.head) || f.base === f.head ||
             f.base > r.base_count || f.head > r.head_count) {
             throw new Error('Invalid per-file counts');
@@ -35,6 +36,33 @@ function readReport(file) {
         if (base > r.base_count || head > r.head_count || head - base !== r.head_count - r.base_count) {
             throw new Error('Inconsistent comparison totals');
         }
+    }
+    // Optional for artifacts produced by workflows already in flight.
+    if (r.warning_diff !== undefined) {
+        const diff = r.warning_diff, deltas = new Map();
+        if (r.base_count === null || !diff || !Array.isArray(diff.removed) || !Array.isArray(diff.added) ||
+            diff.removed.length > r.base_count || diff.added.length > r.head_count ||
+            diff.removed.length + diff.added.length > 10000 ||
+            diff.added.length - diff.removed.length !== r.head_count - r.base_count) {
+            throw new Error('Invalid warning diff');
+        }
+        for (const [warnings, sign] of [[diff.removed, -1], [diff.added, 1]]) {
+            const seen = new Set();
+            for (const w of warnings) {
+                if (!w || !relativePath(w.file) || !count(w.line) || !w.line || !count(w.column) || !w.column ||
+                    typeof w.message !== 'string' || !w.message.length || w.message.length > 4096 ||
+                    /[\x00-\x1f\x7f]/.test(w.message)) throw new Error('Invalid warning diagnostic');
+                const key = JSON.stringify([w.file, w.line, w.column, w.message]);
+                if (seen.has(key)) throw new Error('Duplicate warning diagnostic');
+                seen.add(key);
+                deltas.set(w.file, (deltas.get(w.file) || 0) + sign);
+            }
+        }
+        for (const f of r.files) {
+            if (deltas.get(f.path) !== f.head - f.base) throw new Error('Inconsistent warning diff');
+            deltas.delete(f.path);
+        }
+        if ([...deltas.values()].some(n => n !== 0)) throw new Error('Inconsistent warning diff');
     }
     return r;
 }
@@ -54,9 +82,28 @@ function render(r) {
             }
             if (r.files.length > 30) lines.push('', `Showing 30 of ${r.files.length} files with changed counts.`);
         }
+        if (r.warning_diff) {
+            const diff = [];
+            let total = 0, length = 0;
+            for (const [warnings, sign] of [[r.warning_diff.removed, '-'], [r.warning_diff.added, '+']]) {
+                for (const w of warnings) {
+                    ++total;
+                    const line = `${sign} ${w.file}:${w.line}:${w.column}: warning: ${w.message} [z3-ast-argument-order]`;
+                    if (diff.length < 100 && length + line.length + 1 <= 12000) {
+                        diff.push(line);
+                        length += line.length + 1;
+                    }
+                }
+            }
+            lines.push('', '<details>', '<summary>Warning diff</summary>', '');
+            // Diagnostics are single lines prefixed with +/-; their contents
+            // cannot close the code fence or inject Markdown/HTML outside it.
+            if (total) lines.push('```diff', ...diff, '```');
+            else lines.push('No warning changes.');
+            if (diff.length < total) lines.push('', `Showing ${diff.length} of ${total} warning changes; full diagnostics are in the run artifacts.`);
+            lines.push('', '</details>');
+        }
     }
-    lines.push('', 'Counts are deduplicated diagnostic locations, not confirmed bugs. File counts do not match individual warnings; full diagnostics are in the run artifacts.',
-               'Warnings are advisory. No automatic fixes are offered or applied.');
     return lines.join('\n');
 }
 

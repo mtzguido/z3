@@ -129,7 +129,13 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.sha }}
-          sparse-checkout: scripts/clang-tidy
+          persist-credentials: false
+
+      - uses: actions/checkout@v7.0.1
+        if: github.event_name == 'pull_request'
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base-source
           persist-credentials: false
 
       - uses: actions/download-artifact@v8.0.1
@@ -152,7 +158,8 @@ jobs:
         run: |
           base_args=()
           if [[ -n "$BASE_SHA" ]]; then
-            base_args=(--base reports/base/summary.json --base-sha "$BASE_SHA")
+            base_args=(--base reports/base/summary.json --base-sha "$BASE_SHA"
+                       --base-source base-source --head-source .)
           fi
           python3 scripts/clang-tidy/compare.py "${base_args[@]}" \
             --head reports/head/summary.json --head-sha "$HEAD_SHA" \
