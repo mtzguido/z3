@@ -2,6 +2,8 @@ name: AST Order Warning Report
 
 on:
   pull_request:
+  push:
+    branches: [master]
   schedule:
     - cron: '30 3 * * *'
   workflow_dispatch:
@@ -22,24 +24,45 @@ jobs:
       fail-fast: false
       matrix:
         revision: ${{ fromJSON(github.event_name == 'pull_request' && '["base", "head"]' || '["head"]') }}
+    env:
+      SCAN_SHA: ${{ matrix.revision == 'base' && github.event.pull_request.base.sha || github.sha }}
     steps:
       # Both scans use exactly the same checker, including when the PR changes it.
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.sha }}
           path: tooling
-          sparse-checkout: scripts/clang-tidy
+          sparse-checkout: |
+            scripts/clang-tidy
+            .github/workflows
           persist-credentials: false
 
       - uses: actions/checkout@v7.0.1
         with:
           # Compare the merge result with its base, so a PR behind master does
           # not appear to undo warning fixes that are already upstream.
-          ref: ${{ matrix.revision == 'base' && github.event.pull_request.base.sha || github.sha }}
+          ref: ${{ env.SCAN_SHA }}
           path: source
           persist-credentials: false
 
+      - name: Identify the scan cache
+        id: scan-key
+        env:
+          CHECKER_HASH: ${{ hashFiles('tooling/scripts/clang-tidy/**', 'tooling/.github/workflows/ast-order-warning-report.yml') }}
+        run: |
+          echo "key=ast-order-v1-$RUNNER_OS-$RUNNER_ARCH-${ImageVersion:?}-llvm21.1.8-$CHECKER_HASH-$SCAN_SHA" >> "$GITHUB_OUTPUT"
+
+      # Only successful jobs save a cache. Default-branch runs populate the
+      # baseline cache available to PRs; PR caches remain scoped to that PR.
+      - name: Restore a completed scan
+        id: scan-cache
+        uses: actions/cache@v5
+        with:
+          path: ast-order-report
+          key: ${{ steps.scan-key.outputs.key }}
+
       - name: Install LLVM 21.1.8
+        if: steps.scan-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key -o /tmp/llvm.asc
@@ -51,18 +74,20 @@ jobs:
           test "$(llvm-config-21 --version)" = '21.1.8'
 
       - name: Build and test the warning-only checker
+        if: steps.scan-cache.outputs.cache-hit != 'true'
         run: |
           cmake -G Ninja -S tooling/scripts/clang-tidy -B build-tidy \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=clang-21 -DCMAKE_CXX_COMPILER=clang++-21 \
             -DLLVM_DIR=/usr/lib/llvm-21/lib/cmake/llvm \
             -DCLANG_TIDY=/usr/bin/clang-tidy-21
-          cmake --build build-tidy --parallel 2
+          cmake --build build-tidy --parallel "$(nproc)"
           ctest --test-dir build-tidy --output-on-failure
           python3 -m unittest discover -s tooling/scripts/clang-tidy/tests -p 'test_*.py'
           node --test tooling/scripts/clang-tidy/tests/comment.test.js
 
       - name: Generate sources and the compilation database
+        if: steps.scan-cache.outputs.cache-hit != 'true'
         run: |
           cmake -G Ninja -S source -B build \
             -DCMAKE_CXX_COMPILER=clang++-21 \
@@ -74,10 +99,17 @@ jobs:
             src/api/api_log_macros.h src/ast/pattern/database.h
 
       - name: Report AST argument-order warnings
+        if: steps.scan-cache.outputs.cache-hit != 'true'
         run: |
+          rm -rf ast-order-report
           python3 tooling/scripts/clang-tidy/run.py \
             --clang-tidy clang-tidy-21 --plugin build-tidy/Z3TidyModule.so \
-            --build build --source-root source --output ast-order-report --jobs 2
+            --build build --source-root source --output ast-order-report --jobs "$(nproc)"
+
+      - name: Validate and print the warning count
+        run: |
+          python3 tooling/scripts/clang-tidy/compare.py \
+            --head ast-order-report/summary.json --head-sha "$SCAN_SHA" --output scan-count
           cat ast-order-report/warnings.txt
 
       - name: Upload diagnostics

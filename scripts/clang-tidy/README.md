@@ -54,12 +54,21 @@ to a checkout and writes relative paths, allowing comparisons across build trees
 ## Pull-request reports
 
 `.github/workflows/ast-order-warning-report.yml` runs on every PR, including
-documentation-only PRs, and on the existing nightly/manual triggers. It selects
+documentation-only PRs, pushes to master, and the nightly/manual triggers. It selects
 LLVM 21 packages and rejects a version other than 21.1.8. PR runs scan the base
 commit and GitHub's PR merge commit in parallel using the same checker source and
 compiler version. Comparing the merge result avoids attributing intervening
 upstream fixes to a PR that is behind its base branch. Nightly/manual runs report
 the checked-out revision's count without inventing a baseline.
+
+Each uncached scan uses all CPUs available to its runner, with the worker count
+and elapsed time printed in the log. Completed scans are cached by source commit,
+LLVM version, runner image/architecture, and a hash of the checker, its scripts,
+and the workflow configuration. Only exact cache hits skip analysis, and restored
+reports are validated before use. Failed scans are never cached. Default-branch
+pushes and nightly runs populate the shared baseline cache; subsequent PRs can
+reuse it. GitHub scopes caches created by PR runs to that PR, so a cold baseline
+may still be scanned by several PRs until a default-branch run caches it.
 
 The job log and Actions summary show, for example:
 

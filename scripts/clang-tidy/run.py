@@ -46,7 +46,9 @@ def main():
     if not sources:
         parser.error("no translation units selected")
     args.output.mkdir(parents=True, exist_ok=True)
-    print(f"Checking {len(sources)} translation units with clang-tidy {VERSION}", flush=True)
+    scan_start = time.monotonic()
+    print(f"Checking {len(sources)} translation units with clang-tidy {VERSION} "
+          f"using {args.jobs} workers", flush=True)
 
     def run(item):
         index, source = item
@@ -75,9 +77,11 @@ def main():
                 warnings.add((path, line, column, message))
             if len(results) % 25 == 0 or result["returncode"] or len(results) == len(sources):
                 print(f"{len(results)}/{len(sources)} checked; {len(warnings)} distinct warnings; "
-                      f"{sum(r['returncode'] != 0 for r in results)} failed", flush=True)
+                      f"{sum(r['returncode'] != 0 for r in results)} failed; "
+                      f"{time.monotonic() - scan_start:.0f}s elapsed", flush=True)
     failed = sum(result["returncode"] != 0 for result in results)
     summary = {"check": CHECK, "clang_tidy_version": version.strip(),
+               "jobs": args.jobs, "elapsed_seconds": round(time.monotonic() - scan_start, 2),
                "warning_count": len(warnings), "failed_translation_units": failed,
                "translation_units": sorted(results, key=lambda r: r["source"]),
                "warnings": [{"file": path, "line": int(line), "column": int(column), "message": message}
