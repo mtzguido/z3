@@ -25,11 +25,42 @@ class Reports(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = pathlib.Path(self.temp.name)
 
-    def summary(self, name, warnings, units=None, version='LLVM version 21.1.8'):
+    def summary(self, name, warnings, units=None, version='LLVM version 21.1.8', scope=None):
         path = self.root / name
-        path.write_text(json.dumps(dict(check=comparison.CHECK, clang_tidy_version=version,
-            translation_units=units if units is not None else [dict(returncode=0)], warnings=warnings)))
+        data = dict(check=comparison.CHECK, clang_tidy_version=version,
+            translation_units=units if units is not None else [dict(returncode=0)], warnings=warnings)
+        if scope is not None:
+            data['scope'] = scope
+        path.write_text(json.dumps(data))
         return path
+
+    def test_empty_pr_scan_is_valid_only_with_explicit_matching_selection(self):
+        scope = dict(mode='affected', selection_id='a' * 64, selected=0, total=10)
+        base = self.summary('base.json', [], units=[], scope=dict(scope, revision='base'))
+        head = self.summary('head.json', [], units=[], scope=dict(scope, revision='head'))
+        result = comparison.compare(base, head, BASE, HEAD)
+        self.assertEqual(0, result['head_count'])
+        self.assertEqual(dict(mode='affected', base_units=0, head_units=0, base_total=10, head_total=10),
+                         result['scope'])
+        for patch in [dict(selection_id='b' * 64), dict(revision='base'), dict(selected=1),
+                      dict(mode='full'), dict(total=0)]:
+            head = self.summary('head.json', [], units=[], scope=dict(scope, revision='head') | patch)
+            with self.assertRaises(ValueError):
+                comparison.compare(base, head, BASE, HEAD)
+        head = self.summary('head.json', [warning('src/a.cpp')], units=[], scope=dict(scope, revision='head'))
+        with self.assertRaises(ValueError):
+            comparison.compare(base, head, BASE, HEAD)
+
+    def test_selected_scan_cannot_be_compared_to_full_or_partial_scan(self):
+        scope = dict(mode='affected', selection_id='a' * 64, revision='head', selected=2, total=10)
+        head = self.summary('head.json', [], units=[dict(returncode=0)], scope=scope)
+        base = self.summary('base.json', [])
+        with self.assertRaisesRegex(ValueError, 'invalid scan scope'):
+            comparison.compare(base, head, BASE, HEAD)
+        scope['selected'] = 1
+        head = self.summary('head.json', [], scope=scope)
+        with self.assertRaisesRegex(ValueError, 'different selections'):
+            comparison.compare(base, head, BASE, HEAD)
 
     def test_header_duplicates_and_line_shifts_do_not_inflate_delta(self):
         base = self.summary('base.json', [warning('src/shared.h')] * 2 + [warning('src/old.cpp')])
@@ -53,6 +84,33 @@ class Reports(unittest.TestCase):
         result = comparison.compare(base, head, BASE, HEAD)
         self.assertEqual(result['base_count'], result['head_count'])
         self.assertEqual(2, len(result['files']))
+        self.assertEqual([warning('src/old.cpp')], result['warning_diff']['removed'])
+        self.assertEqual([warning('src/new.cpp')], result['warning_diff']['added'])
+
+    def test_warning_diff_matches_shifted_lines_but_keeps_replaced_warnings(self):
+        before, after = self.root / 'before', self.root / 'after'
+        for root in [before, after]:
+            (root / 'src').mkdir(parents=True)
+        (before / 'src/test.cpp').write_text('drop();\nkeep();\n')
+        (after / 'src/test.cpp').write_text('// added line\n// another line\nkeep();\nadded();\n')
+        base = self.summary('base.json', [warning('src/test.cpp', 1), warning('src/test.cpp', 2)] * 2)
+        head = self.summary('head.json', [warning('src/test.cpp', 3), warning('src/test.cpp', 4)])
+        result = comparison.compare(base, head, BASE, HEAD, base_source=before, head_source=after)
+        self.assertEqual([], result['files'])
+        self.assertEqual({'removed': [warning('src/test.cpp', 1)], 'added': [warning('src/test.cpp', 4)]},
+                         result['warning_diff'])
+
+    def test_warning_diff_handles_added_and_deleted_files(self):
+        before, after = self.root / 'before', self.root / 'after'
+        for root in [before, after]:
+            (root / 'src').mkdir(parents=True)
+        (before / 'src/old.cpp').write_text('old();\n')
+        (after / 'src/new.cpp').write_text('new();\n')
+        base = self.summary('base.json', [warning('src/old.cpp')])
+        head = self.summary('head.json', [warning('src/new.cpp')])
+        result = comparison.compare(base, head, BASE, HEAD, base_source=before, head_source=after)
+        self.assertEqual({'removed': [warning('src/old.cpp')], 'added': [warning('src/new.cpp')]},
+                         result['warning_diff'])
 
     def test_reject_incomplete_scan_and_version_mismatch(self):
         head = self.summary('head.json', [])
@@ -113,6 +171,22 @@ else:
             self.assertEqual(fail, 'incomplete' in p.stdout)
             self.assertEqual({'src/a.cpp', 'src/b.cpp', 'src/shared.h'},
                              {w['file'] for w in summary['warnings']})
+
+        (source / 'src/fail').unlink()
+        for keys in [['build/src/a.cpp'], []]:
+            selection = self.root / 'selection.json'
+            selection.write_text(json.dumps(dict(schema_version=1, mode='affected',
+                head=dict(sources=keys, total=2))))
+            out = self.root / 'selected'
+            p = subprocess.run([sys.executable, str(ROOT / 'run.py'), '--clang-tidy', str(tidy),
+                '--plugin', str(self.root / 'unused.so'), '--build', str(source),
+                '--source-root', str(source), '--output', str(out), '--selection', str(selection),
+                '--revision', 'head'], capture_output=True, text=True, check=True)
+            summary = json.loads((out / 'summary.json').read_text())
+            self.assertEqual(len(keys), len(summary['translation_units']))
+            self.assertEqual(2 if keys else 0, summary['warning_count'])
+            self.assertEqual(len(keys), summary['scope']['selected'])
+            comparison.read_summary(out / 'summary.json')
 
 
 if __name__ == '__main__':
