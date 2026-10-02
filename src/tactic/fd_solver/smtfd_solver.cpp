@@ -374,6 +374,9 @@ namespace smtfd {
         app*       m_t;
         sort*      m_s;
         unsigned   m_val_offset;
+
+        // Array identity selects the table; only the indices form its keys.
+        unsigned first_arg() const { return is_func_decl(m_f) ? 0 : 1; }
     };
 
     class theory_plugin;
@@ -563,7 +566,8 @@ namespace smtfd {
                 if (e1 != e2) m_args.push_back(m.mk_eq(e1, e2));
             }            
             TRACE(smtfd_verbose, tout << "diff: " << mk_bounded_pp(f1.m_t, m, 2) << " " << mk_bounded_pp(f2.m_t, m, 2) << "\n";);
-            m_context.add(m.mk_implies(mk_and(m_args), m.mk_eq(f1.m_t, f2.m_t)), __FUNCTION__);
+            expr_ref premise = mk_and(m_args);
+            m_context.add(m.mk_implies(premise, m.mk_eq(f1.m_t, f2.m_t)), __FUNCTION__);
         }
 
         std::ostream& display(std::ostream& out) {
@@ -686,9 +690,9 @@ namespace smtfd {
     }
 
     bool f_app_eq::operator()(f_app const& a, f_app const& b) const {
-        if (a.m_f != b.m_f) 
+        if (a.m_t->get_decl() != b.m_t->get_decl())
             return false;
-        for (unsigned i = 0; i < a.m_t->get_num_args(); ++i) {
+        for (unsigned i = a.first_arg(); i < a.m_t->get_num_args(); ++i) {
             if (p.values().get(a.m_val_offset+i) != p.values().get(b.m_val_offset+i)) 
                 return false;
             if (a.m_t->get_arg(i)->get_sort() != b.m_t->get_arg(i)->get_sort())
@@ -698,7 +702,8 @@ namespace smtfd {
     }
 
     unsigned f_app_hash::operator()(f_app const& a) const {
-        return get_composite_hash(p.values().data() + a.m_val_offset, a.m_t->get_num_args(), *this, *this);
+        unsigned first = a.first_arg();
+        return get_composite_hash(p.values().data() + a.m_val_offset + first, a.m_t->get_num_args() - first, *this, *this);
     }
     
     class basic_plugin : public theory_plugin {
@@ -1142,7 +1147,8 @@ namespace smtfd {
         }
 
         bool same_table(expr* v1, sort* s1, expr* v2, sort* s2) {
-            return same_table(ast2table(v1, s1), ast2table(v2, s2));
+            table& t1 = ast2table(v1, s1);
+            return same_table(t1, ast2table(v2, s2));
         }
 
         void enforce_extensionality(expr* a, expr* b) {
@@ -1156,11 +1162,12 @@ namespace smtfd {
             expr_ref a1(m_autil.mk_select(args), m);
             args[0] = b;
             expr_ref b1(m_autil.mk_select(args), m);
-            expr_ref ext(m.mk_iff(m.mk_eq(a1, b1), m.mk_eq(a, b)), m);
-            if (!m.is_true(eval_abs(ext))) {
-                TRACE(smtfd, tout << mk_bounded_pp(a, m, 2) << " " << mk_bounded_pp(b, m, 2) << "\n";);
-                m_context.add(ext, __FUNCTION__);            
-            }
+            expr_ref eq_select(m.mk_eq(a1, b1), m);
+            expr_ref ext(m.mk_iff(eq_select, m.mk_eq(a, b)), m);
+            // The arrays have different abstract values but identical observed reads.
+            // Evaluating a newly abstracted equality here can hide the violation.
+            TRACE(smtfd, tout << mk_bounded_pp(a, m, 2) << " " << mk_bounded_pp(b, m, 2) << "\n";);
+            m_context.add(ext, __FUNCTION__);
         }
 
         expr_ref mk_array_value(table& t) {

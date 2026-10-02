@@ -153,6 +153,7 @@ add_executable(test-z3
   small_object_allocator.cpp
   smt2print_parse.cpp
   smt_context.cpp
+  smtfd.cpp
   solver_pool.cpp
   sorting_network.cpp
   stack.cpp
