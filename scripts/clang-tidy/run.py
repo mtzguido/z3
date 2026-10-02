@@ -10,6 +10,7 @@ import pathlib
 import re
 import subprocess
 import time
+from affected import compilation_units, selection_id
 
 CHECK = "z3-ast-argument-order"
 VERSION = "21.1.8"
@@ -25,9 +26,13 @@ def main():
                         help="report only warnings under this checkout, using relative paths")
     parser.add_argument("--jobs", type=int, default=min(4, os.cpu_count() or 1))
     parser.add_argument("--filter", default=r"/src/", help="regex selecting source paths")
+    parser.add_argument("--selection", type=pathlib.Path, help="PR selection produced by affected.py")
+    parser.add_argument("--revision", choices=["base", "head"], help="side of the PR selection to scan")
     args = parser.parse_args()
     if args.jobs < 1:
         parser.error("--jobs must be positive")
+    if bool(args.selection) != bool(args.revision) or args.selection and not args.source_root:
+        parser.error("--selection requires --revision and --source-root")
     version = subprocess.check_output([args.clang_tidy, "--version"], text=True)
     if not re.search(r"version " + re.escape(VERSION) + r"\b", version):
         parser.error(f"expected clang-tidy {VERSION}, got {version.strip()}")
@@ -43,9 +48,24 @@ def main():
     sources = sorted({str((pathlib.Path(entry["directory"]) / entry["file"]).resolve())
                       for entry in database})
     sources = [source for source in sources if re.search(args.filter, source)]
-    if not sources:
+    scope = None
+    if args.selection:
+        plan = json.loads(args.selection.read_text())
+        units = compilation_units(args.source_root, args.build, args.filter)
+        selected = plan[args.revision]
+        keys = selected["sources"]
+        if (plan["schema_version"] != 1 or plan["mode"] not in {"affected", "full"} or
+                selected["total"] != len(units) or len(keys) != len(set(keys)) or
+                not set(keys) <= units.keys() or plan["mode"] == "full" and set(keys) != units.keys()):
+            parser.error("selection does not match the compilation database")
+        sources = [units[key][0]["file"] for key in keys]
+        scope = {"mode": plan["mode"], "selection_id": selection_id(plan), "revision": args.revision,
+                 "selected": len(sources), "total": len(units)}
+    if not sources and not scope:
         parser.error("no translation units selected")
     args.output.mkdir(parents=True, exist_ok=True)
+    if args.selection:
+        (args.output / "selection.json").write_text(args.selection.read_text())
     scan_start = time.monotonic()
     print(f"Checking {len(sources)} translation units with clang-tidy {VERSION} "
           f"using {args.jobs} workers", flush=True)
@@ -87,6 +107,8 @@ def main():
                "warnings": [{"file": path, "line": int(line), "column": int(column), "message": message}
                             for path, line, column, message in sorted(
                                 warnings, key=lambda w: (w[0], int(w[1]), int(w[2]), w[3]))]}
+    if scope:
+        summary["scope"] = scope
     (args.output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     (args.output / "warnings.txt").write_text("".join(
         f"{w['file']}:{w['line']}:{w['column']}: warning: {w['message']} [{CHECK}]\n"

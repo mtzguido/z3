@@ -26,6 +26,10 @@ jobs:
         revision: ${{ fromJSON(github.event_name == 'pull_request' && '["base", "head"]' || '["head"]') }}
     env:
       SCAN_SHA: ${{ matrix.revision == 'base' && github.event.pull_request.base.sha || github.sha }}
+      OTHER_SHA: ${{ matrix.revision == 'base' && github.sha || github.event.pull_request.base.sha }}
+      PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      TESTED_SHA: ${{ github.sha }}
+      REVISION: ${{ matrix.revision }}
     steps:
       # Both scans use exactly the same checker, including when the PR changes it.
       - uses: actions/checkout@v7.0.1
@@ -43,6 +47,8 @@ jobs:
           # not appear to undo warning fixes that are already upstream.
           ref: ${{ env.SCAN_SHA }}
           path: source
+          # A PR merge's first parent is the base used by affected.py's diff.
+          fetch-depth: 2
           persist-credentials: false
 
       - name: Identify the scan cache
@@ -50,16 +56,27 @@ jobs:
         env:
           CHECKER_HASH: ${{ hashFiles('tooling/scripts/clang-tidy/**', 'tooling/.github/workflows/ast-order-warning-report.yml') }}
         run: |
-          echo "key=ast-order-v1-$RUNNER_OS-$RUNNER_ARCH-${ImageVersion:?}-llvm21.1.8-$CHECKER_HASH-$SCAN_SHA" >> "$GITHUB_OUTPUT"
+          # PR reports depend on the affected set from BOTH revisions. They
+          # must not share a key with full reports or with another PR's scope.
+          scope="full-$SCAN_SHA"
+          if [[ -n "$PR_BASE_SHA" ]]; then scope="pr-$PR_BASE_SHA-$TESTED_SHA-$REVISION"; fi
+          echo "key=ast-order-v2-$RUNNER_OS-$RUNNER_ARCH-${ImageVersion:?}-llvm21.1.8-$CHECKER_HASH-$scope" >> "$GITHUB_OUTPUT"
 
-      # Only successful jobs save a cache. Default-branch runs populate the
-      # baseline cache available to PRs; PR caches remain scoped to that PR.
+      # Only successful jobs save a cache; PR caches remain scoped to that PR.
       - name: Restore a completed scan
         id: scan-cache
         uses: actions/cache@v5
         with:
           path: ast-order-report
           key: ${{ steps.scan-key.outputs.key }}
+
+      - uses: actions/checkout@v7.0.1
+        if: github.event_name == 'pull_request' && steps.scan-cache.outputs.cache-hit != 'true'
+        with:
+          ref: ${{ env.OTHER_SHA }}
+          path: other-source
+          fetch-depth: 2
+          persist-credentials: false
 
       - name: Install LLVM 21.1.8
         if: steps.scan-cache.outputs.cache-hit != 'true'
@@ -70,7 +87,7 @@ jobs:
           echo 'deb [signed-by=/usr/share/keyrings/llvm.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-21 main' \
             | sudo tee /etc/apt/sources.list.d/llvm-21.list
           sudo apt-get update
-          sudo apt-get install -y clang-21 clang-tidy-21 llvm-21-dev libclang-21-dev ninja-build
+          sudo apt-get install -y clang-21 clang-tools-21 clang-tidy-21 llvm-21-dev libclang-21-dev ninja-build
           test "$(llvm-config-21 --version)" = '21.1.8'
 
       - name: Build and test the warning-only checker
@@ -89,22 +106,45 @@ jobs:
       - name: Generate sources and the compilation database
         if: steps.scan-cache.outputs.cache-hit != 'true'
         run: |
-          cmake -G Ninja -S source -B build \
-            -DCMAKE_CXX_COMPILER=clang++-21 \
-            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            -DCMAKE_ADD_CUSTOM_COMMAND_DEPENDS_EXPLICIT_ONLY=ON
-          # These Python generators declare all their inputs. Avoid CMake's
-          # implicit component dependencies: clang-tidy needs no Z3 objects.
-          cmake --build build --parallel 2 --target \
-            src/api/api_log_macros.h src/ast/pattern/database.h
+          generate() {
+            cmake -G Ninja -S "$1" -B "$2" \
+              -DCMAKE_CXX_COMPILER=clang++-21 \
+              -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+              -DZ3_INCLUDE_GIT_HASH=OFF -DZ3_INCLUDE_GIT_DESCRIBE=OFF \
+              -DCMAKE_ADD_CUSTOM_COMMAND_DEPENDS_EXPLICIT_ONLY=ON
+            # These Python generators declare all their inputs. Avoid CMake's
+            # implicit component dependencies: clang-tidy needs no Z3 objects.
+            cmake --build "$2" --parallel 2 --target \
+              src/api/api_log_macros.h src/ast/pattern/database.h
+          }
+          generate source build
+          if [[ -n "$PR_BASE_SHA" ]]; then generate other-source other-build; fi
+
+      - name: Select PR sources and header dependents
+        if: github.event_name == 'pull_request' && steps.scan-cache.outputs.cache-hit != 'true'
+        run: |
+          base_source=source; base_build=build
+          head_source=other-source; head_build=other-build
+          if [[ "$REVISION" == head ]]; then
+            base_source=other-source; base_build=other-build
+            head_source=source; head_build=build
+          fi
+          python3 tooling/scripts/clang-tidy/affected.py \
+            --base-source "$base_source" --base-build "$base_build" \
+            --head-source "$head_source" --head-build "$head_build" \
+            --jobs "$(nproc)" --output ast-order-selection.json
 
       - name: Report AST argument-order warnings
         if: steps.scan-cache.outputs.cache-hit != 'true'
         run: |
           rm -rf ast-order-report
+          selection_args=()
+          if [[ -n "$PR_BASE_SHA" ]]; then
+            selection_args=(--selection ast-order-selection.json --revision "$REVISION")
+          fi
           python3 tooling/scripts/clang-tidy/run.py \
             --clang-tidy clang-tidy-21 --plugin build-tidy/Z3TidyModule.so \
-            --build build --source-root source --output ast-order-report --jobs "$(nproc)"
+            --build build --source-root source --output ast-order-report --jobs "$(nproc)" "${selection_args[@]}"
 
       - name: Validate and print the warning count
         run: |

@@ -32,6 +32,7 @@ ctest --test-dir build-tidy --output-on-failure
 cmake -G Ninja -S . -B build \
   -DCMAKE_CXX_COMPILER=clang++-21 \
   -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+  -DZ3_INCLUDE_GIT_HASH=OFF -DZ3_INCLUDE_GIT_DESCRIBE=OFF \
   -DCMAKE_ADD_CUSTOM_COMMAND_DEPENDS_EXPLICIT_ONLY=ON
 cmake --build build --target src/api/api_log_macros.h src/ast/pattern/database.h
 python3 scripts/clang-tidy/run.py \
@@ -55,20 +56,40 @@ to a checkout and writes relative paths, allowing comparisons across build trees
 
 `.github/workflows/ast-order-warning-report.yml` runs on every PR, including
 documentation-only PRs, pushes to master, and the nightly/manual triggers. It selects
-LLVM 21 packages and rejects a version other than 21.1.8. PR runs scan the base
-commit and GitHub's PR merge commit in parallel using the same checker source and
-compiler version. Comparing the merge result avoids attributing intervening
-upstream fixes to a PR that is behind its base branch. Nightly/manual runs report
-the checked-out revision's count without inventing a baseline.
+LLVM 21 packages and rejects a version other than 21.1.8. PR runs compare the base
+commit and GitHub's PR merge commit using the same checker source and compiler
+version. Comparing the merge result avoids attributing intervening upstream fixes
+to a PR that is behind its base branch. Pushes to master and nightly/manual runs
+scan all translation units and report the revision's count without inventing a baseline.
+
+On PRs, `affected.py` runs `clang-scan-deps-21` on both compilation databases.
+It selects changed source files and every translation unit that directly or
+transitively includes a changed header on either side. Both versions of those
+translation units are checked, including when an include was removed. Added and
+deleted translation units and changes to generated headers/sources are included.
+The dependency scan preprocesses the code without compiling Z3. Build configuration,
+compiler command, or checker changes trigger full scans. Documentation-only PRs
+normally select no translation units and explicitly report that nothing needs checking.
+The scan builds omit Git metadata from `z3_version.h`, so a new commit alone does
+not make files depending on that generated header need analysis.
+
+Base and head checks run in parallel. Each job performs the cheap dependency scans
+of both revisions, avoiding another CI job and artifact transfer before analysis.
+The runner uses `--selection ast-order-selection.json --revision base` (or `head`)
+to apply the resulting plan. It reports all diagnostics in the selected files,
+including headers and unchanged lines. PR comments label counts as warnings in
+affected files and show the number of translation units checked on each side;
+these are not whole-repository totals. Mismatched selections and incomplete scans
+cannot produce a warning delta.
 
 Each uncached scan uses all CPUs available to its runner, with the worker count
-and elapsed time printed in the log. Completed scans are cached by source commit,
-LLVM version, runner image/architecture, and a hash of the checker, its scripts,
-and the workflow configuration. Only exact cache hits skip analysis, and restored
-reports are validated before use. Failed scans are never cached. Default-branch
-pushes and nightly runs populate the shared baseline cache; subsequent PRs can
-reuse it. GitHub scopes caches created by PR runs to that PR, so a cold baseline
-may still be scanned by several PRs until a default-branch run caches it.
+and elapsed time printed in the log. Completed scans are cached by LLVM version,
+runner image/architecture, and a hash of the checker, its scripts, and the workflow.
+Full reports use the source commit as their cache identity. PR reports include
+both the base and tested merge commits and the scanned side, so a cached full
+report or another comparison's affected set cannot be substituted accidentally.
+Only exact cache hits skip preparation and analysis; restored reports are validated
+before use. Failed scans are never cached. GitHub scopes PR caches to that PR.
 
 The job log and Actions summary show, for example:
 

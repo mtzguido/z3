@@ -20,6 +20,17 @@ function readReport(file) {
         !(r.base_sha === null && r.base_count === null || SHA.test(r.base_sha) && count(r.base_count))) {
         throw new Error('Invalid comparison schema');
     }
+    if (r.scope !== undefined) {
+        const s = r.scope;
+        if (!s || !['affected', 'full'].includes(s.mode) ||
+            !count(s.head_units) || !count(s.head_total) || !s.head_total || s.head_units > s.head_total ||
+            (r.base_count === null ? s.base_units !== null || s.base_total !== null :
+                !count(s.base_units) || !count(s.base_total) || !s.base_total || s.base_units > s.base_total) ||
+            s.mode === 'full' && (s.head_units !== s.head_total || s.base_units !== s.base_total) ||
+            s.head_units === 0 && r.head_count !== 0 || s.base_units === 0 && r.base_count !== 0) {
+            throw new Error('Invalid scan scope');
+        }
+    }
     const paths = new Set();
     for (const f of r.files) {
         if (!relativePath(f.path) ||
@@ -69,6 +80,15 @@ function readReport(file) {
 
 function render(r) {
     const lines = ['### AST argument-order warnings', ''];
+    if (r.scope) {
+        const s = r.scope;
+        if (s.base_units === 0 && s.head_units === 0) lines.push('No C++ translation units are affected by this PR.', '');
+        else {
+            const sides = s.base_units === null ? `**${s.head_units}/${s.head_total}** translation units` :
+                `base **${s.base_units}/${s.base_total}**, PR **${s.head_units}/${s.head_total}** translation units`;
+            lines.push(`${s.mode === 'affected' ? 'Warnings in affected files' : 'Full scan'} (${sides}).`, '');
+        }
+    }
     if (r.base_count === null) lines.push(`Warnings: **${r.head_count}** (\`${r.head_sha.slice(0, 12)}\`).`);
     else {
         lines.push(`Base: **${r.base_count}** → PR: **${r.head_count}**; change: **${signed(r.head_count - r.base_count)}**.`, '',

@@ -186,3 +186,19 @@ test('keep diff contents inside the code block and bound large comments', t => {
     assert.match(text, /Showing \d+ of 200 warning changes/);
     assert.ok(text.length < 65536);
 });
+
+test('label affected-file counts and documentation-only PRs', t => {
+    const scope = {mode: 'affected', base_units: 14, head_units: 14, base_total: 1049, head_total: 1049};
+    const value = {...report(), scope};
+    const text = render(readReport(fixture(t, value).file));
+    assert.match(text, /Warnings in affected files \(base \*\*14\/1049\*\*, PR \*\*14\/1049\*\* translation units\)/);
+    const empty = {...value, base_count: 0, head_count: 0, files: [],
+        scope: {...scope, base_units: 0, head_units: 0}};
+    assert.match(render(readReport(fixture(t, empty).file)), /No C\+\+ translation units are affected/);
+    assert.match(render(readReport(fixture(t, {...value,
+        scope: {...scope, mode: 'full', base_units: 1049, head_units: 1049}}).file)), /Full scan/);
+    for (const patch of [{mode: 'unknown'}, {head_units: -1}, {base_units: 1050}, {head_total: 0},
+                         {head_units: 0}, {base_units: '14'}, {mode: 'full'}]) {
+        assert.throws(() => readReport(fixture(t, {...value, scope: {...scope, ...patch}}).file), /Invalid scan scope/);
+    }
+});

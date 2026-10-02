@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Microsoft Corporation
 # SPDX-License-Identifier: MIT
-"""Compare warning counts from complete scans of a base and head checkout."""
+"""Compare warning counts from completed scans with matching scope."""
 import argparse
 from collections import Counter
 from difflib import SequenceMatcher
@@ -17,7 +17,18 @@ def read_summary(path):
     if summary["check"] != CHECK:
         raise ValueError("unexpected clang-tidy check")
     units = summary["translation_units"]
-    if not units or any(unit["returncode"] != 0 for unit in units):
+    scope = summary.get("scope")
+    if scope is not None:
+        if (scope.get("mode") not in {"affected", "full"} or
+                scope.get("revision") not in {"base", "head"} or
+                not re.fullmatch(r"[0-9a-f]{64}", scope.get("selection_id", "")) or
+                type(scope.get("selected")) is not int or type(scope.get("total")) is not int or
+                not 0 <= scope["selected"] <= scope["total"] or scope["total"] < 1 or
+                scope["selected"] != len(units) or
+                scope["mode"] == "full" and scope["selected"] != scope["total"]):
+            raise ValueError("invalid scan scope")
+    if ((not units and (not scope or scope["mode"] != "affected" or summary["warnings"])) or
+            any(unit["returncode"] != 0 for unit in units)):
         raise ValueError(f"{path}: scan is incomplete; refusing to compare warning counts")
     # Deduplicate header diagnostics shared by several translation units.
     warnings = {(w["file"], w["line"], w["column"], w["message"])
@@ -26,7 +37,7 @@ def read_summary(path):
         p = pathlib.PurePosixPath(file)
         if p.is_absolute() or ".." in p.parts or any(ord(c) < 32 for c in file):
             raise ValueError("expected checkout-relative diagnostic paths; use --source-root")
-    return summary["clang_tidy_version"], warnings
+    return summary["clang_tidy_version"], warnings, scope
 
 
 def warning_diff(base, head, base_source=None, head_source=None):
@@ -59,20 +70,30 @@ def warning_diff(base, head, base_source=None, head_source=None):
 
 def compare(base_path, head_path, base_sha, head_sha, tested_sha=None, base_source=None, head_source=None):
     tested_sha = tested_sha or head_sha
-    head_version, head_warnings = read_summary(head_path)
+    head_version, head_warnings, head_scope = read_summary(head_path)
     head = Counter(w[0] for w in head_warnings)
+    scope = {} if head_scope is None else {"scope": {"mode": head_scope["mode"],
+        "base_units": None, "base_total": None,
+        "head_units": head_scope["selected"], "head_total": head_scope["total"]}}
     if not base_path:
         return {"schema_version": 1, "head_sha": head_sha, "tested_sha": tested_sha, "base_sha": None,
-                "head_count": sum(head.values()), "base_count": None, "files": []}
-    base_version, base_warnings = read_summary(base_path)
+                "head_count": sum(head.values()), "base_count": None, "files": [], **scope}
+    base_version, base_warnings, base_scope = read_summary(base_path)
     base = Counter(w[0] for w in base_warnings)
     if base_version != head_version:
         raise ValueError("base and head scans used different clang-tidy versions")
+    if bool(base_scope) != bool(head_scope) or base_scope and (
+            base_scope["selection_id"] != head_scope["selection_id"] or
+            base_scope["mode"] != head_scope["mode"] or
+            base_scope["revision"] != "base" or head_scope["revision"] != "head"):
+        raise ValueError("base and head scans used different selections")
+    if base_scope:
+        scope["scope"].update(base_units=base_scope["selected"], base_total=base_scope["total"])
     files = [{"path": path, "base": base[path], "head": head[path]}
              for path in sorted(base.keys() | head.keys()) if base[path] != head[path]]
     return {"schema_version": 1, "base_sha": base_sha, "head_sha": head_sha, "tested_sha": tested_sha,
             "base_count": sum(base.values()), "head_count": sum(head.values()), "files": files,
-            "warning_diff": warning_diff(base_warnings, head_warnings, base_source, head_source)}
+            "warning_diff": warning_diff(base_warnings, head_warnings, base_source, head_source), **scope}
 
 
 def main():
@@ -97,6 +118,9 @@ def main():
                      args.base_source, args.head_source)
     args.output.mkdir(parents=True, exist_ok=True)
     (args.output / "comparison.json").write_text(json.dumps(report, indent=2) + "\n")
+    if "scope" in report:
+        scope = report["scope"]
+        print(f"Scan scope: {scope['mode']}; {scope['head_units']}/{scope['head_total']} head translation units")
     print(f"AST argument-order warnings: {report['head_count']}")
     if report["base_count"] is not None:
         print(f"Base: {report['base_count']}; change: {report['head_count'] - report['base_count']:+d}")
