@@ -88,6 +88,13 @@ void nex_creator::simplify_children_of_mul(vector<nex_pow> & children, rational&
         coeff *= pm.coeff().expt(p.pow());
     }
 
+    // mul_to_powers uses the monomial ordering, which ignores coefficients.
+    // Two distinct sum factors could otherwise compare equal.
+    unsigned num_sum_factors = 0;
+    for (nex_pow const& p : children)
+        num_sum_factors += p.e()->is_sum();
+    SASSERT(num_sum_factors <= 1);
+
     mul_to_powers(children);
     
     TRACE(grobner_d, print_vector(children, tout););    
@@ -666,4 +673,3 @@ bool nex_creator::equal(const nex* a, const nex* b) {
     TRACE(grobner_d, tout << "b = " << *b << ", canonized b = " << *cb << "\n";);
     return !(cn.gt(ca, cb) || cn.gt(cb, ca));
 }
-
