@@ -1,0 +1,140 @@
+name: Solver determinism
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: determinism-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  variants:
+    name: Trace (${{ matrix.profile }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [gcc, clang, libcxx, libcxx-random]
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache-determinism
+      CCACHE_MAXSIZE: 1G
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read the pinned corpus revision
+        id: corpus
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          revision = json.loads(Path('scripts/determinism/corpus.json').read_text())['revision']
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'revision={revision}\n')
+          PY
+
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: Z3Prover/z3test
+          ref: ${{ steps.corpus.outputs.revision }}
+          path: z3test
+          persist-credentials: false
+
+      - name: Install compilers and libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-14 clang-18 libc++-18-dev libc++abi-18-dev ninja-build ccache
+          g++-14 --version
+          clang++-18 --version
+          dpkg-query -W g++-14 libstdc++-14-dev clang-18 libc++-18-dev libc++abi-18-dev
+
+      - name: Restore compiler cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: determinism-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.profile }}-gcc14-clang18-${{ hashFiles('scripts/determinism/run.py') }}-${{ github.sha }}
+          restore-keys: |
+            determinism-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.profile }}-gcc14-clang18-${{ hashFiles('scripts/determinism/run.py') }}-
+
+      - name: Build Release solver
+        run: |
+          python3 scripts/determinism/run.py build \
+            --profile '${{ matrix.profile }}' --work build/determinism \
+            --gcc g++-14 --clang clang++-18 --sort-seed 1 --jobs "$(nproc)"
+
+      - name: Run the corpus twice
+        run: |
+          python3 scripts/determinism/run.py run --suite z3test --out reports \
+            --binary '${{ matrix.profile }}=build/determinism/${{ matrix.profile }}/build/z3' \
+            --jobs "$(nproc)"
+
+      - name: Upload raw runs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: determinism-runs-${{ matrix.profile }}
+          path: reports
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: determinism-build-${{ matrix.profile }}
+          path: |
+            build/determinism/${{ matrix.profile }}/*.log
+            build/determinism/${{ matrix.profile }}/build.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Compiler cache statistics
+        if: always()
+        run: ccache -s
+
+  compare:
+    name: Compare exact traces
+    needs: variants
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: determinism-runs-*
+          path: reports
+          merge-multiple: true
+
+      - name: Compare repetitions and configurations
+        run: |
+          python3 scripts/determinism/run.py compare --input reports --out comparison \
+            --profiles gcc clang libcxx libcxx-random
+
+      - name: Publish job summary
+        if: always()
+        run: |
+          if [[ -f comparison/summary.md ]]; then
+            cat comparison/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Comparison could not complete. Check the build and run jobs for missing or invalid artifacts.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: determinism-comparison
+          path: comparison
+          if-no-files-found: warn
+          retention-days: 7

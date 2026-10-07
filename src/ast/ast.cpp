@@ -1255,7 +1255,7 @@ ast_manager::ast_manager(proof_gen_mode m, char const * trace_file, bool is_form
     m_expr_dependency_array_manager(*this, m_alloc),
     m_proof_mode(m) {
 
-    if (trace_file) {
+    if (trace_file && !is_format_manager) {
         m_trace_stream       = alloc(std::fstream, trace_file, std::ios_base::out);
         m_trace_stream_owner = true;
         *m_trace_stream << "[tool-version] Z3 " << Z3_MAJOR_VERSION << "." << Z3_MINOR_VERSION << "." << Z3_BUILD_NUMBER << "\n";
@@ -1274,7 +1274,8 @@ ast_manager::ast_manager(proof_gen_mode m, std::fstream * trace_stream, bool is_
     m_expr_dependency_manager(*this, m_alloc),
     m_expr_dependency_array_manager(*this, m_alloc),
     m_proof_mode(m),
-    m_trace_stream(trace_stream) {
+    // Formatting nodes have their own IDs and are not part of the solver trace.
+    m_trace_stream(is_format_manager ? nullptr : trace_stream) {
 
     if (!is_format_manager)
         m_format_manager = alloc(ast_manager, PGM_DISABLED, trace_stream, true);
