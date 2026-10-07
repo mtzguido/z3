@@ -11,8 +11,8 @@ import itertools
 import json
 import os
 from pathlib import Path
+import platform
 import re
-import resource
 import shlex
 import shutil
 import signal
@@ -20,13 +20,34 @@ import subprocess
 import sys
 import time
 
+if os.name != 'nt':
+    import resource
+
 HERE = Path(__file__).resolve().parent
-PROFILES = ('gcc', 'clang', 'libcxx', 'libcxx-random')
+LINUX_PROFILES = ('gcc', 'clang', 'libcxx', 'libcxx-random')
+PROFILES = (*LINUX_PROFILES, 'apple-clang', 'msvc')
 CHANNELS = ('ast.trace', 'stdout', 'stderr')
+MAX_FILE_BYTES = 128 * 1024 * 1024
+
+
+def default_profiles():
+    if sys.platform == 'win32':
+        return ['msvc']
+    if sys.platform == 'darwin':
+        return ['apple-clang']
+    return list(LINUX_PROFILES)
+
+
+def host_info():
+    return {'system': platform.system(), 'machine': platform.machine(), 'release': platform.release()}
+
+
+def read_json(path):
+    return json.loads(path.read_text(encoding='utf-8'))
 
 
 def write_json(path, value):
-    path.write_text(json.dumps(value, indent=2) + '\n')
+    path.write_text(json.dumps(value, indent=2) + '\n', encoding='utf-8', newline='\n')
 
 
 def digest(path):
@@ -48,13 +69,22 @@ def source_info(source):
 
 
 def build(args, profile, jobs):
+    if profile == 'msvc' and os.name != 'nt':
+        raise ValueError('the msvc profile requires a Windows developer shell')
+    if profile == 'apple-clang' and sys.platform != 'darwin':
+        raise ValueError('the apple-clang profile requires macOS')
     directory = args.work.resolve() / profile
     directory.mkdir(parents=True, exist_ok=True)
     source = args.source.resolve()
-    compiler = shutil.which(args.gcc if profile == 'gcc' else args.clang)
+    selected = args.msvc if profile == 'msvc' else args.gcc if profile == 'gcc' else args.clang
+    compiler = shutil.which(selected)
     if not compiler:
         raise ValueError(f'compiler not found for {profile}')
+    # Forward slashes also avoid CMake escape sequences in Windows compiler paths.
+    compiler = Path(compiler).as_posix()
     flags, link_flags = [], []
+    if profile == 'msvc':
+        flags.append('/utf-8')
     if profile == 'clang':
         # Use the same libstdc++ headers as the selected GCC, even if a newer
         # GCC installation is also visible to Clang on this host.
@@ -72,22 +102,29 @@ def build(args, profile, jobs):
         if profile == 'libcxx-random':
             flags += ['-D_LIBCPP_DEBUG_RANDOMIZE_UNSPECIFIED_STABILITY',
                       '-D_LIBCPP_DEBUG_RANDOMIZE_UNSPECIFIED_STABILITY_SEED=' + str(args.sort_seed)]
+    # Retain CMake's MSVC defaults, including /DWIN32 and /D_WINDOWS required by Z3.
+    flags_suffix = '_INIT' if profile == 'msvc' else ''
     command = ['cmake', '-S', str(source), '-B', str(directory / 'build'), '-G', 'Ninja',
                '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_CXX_STANDARD=20',
-               '-DCMAKE_CXX_COMPILER=' + compiler, '-DCMAKE_CXX_FLAGS=' + shlex.join(flags),
-               '-DCMAKE_EXE_LINKER_FLAGS=' + shlex.join(link_flags),
+               '-DCMAKE_CXX_COMPILER=' + compiler,
+               f'-DCMAKE_CXX_FLAGS{flags_suffix}=' + shlex.join(flags),
+               f'-DCMAKE_EXE_LINKER_FLAGS{flags_suffix}=' + shlex.join(link_flags),
                '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON',
                '-DZ3_INCLUDE_GIT_HASH=OFF', '-DZ3_INCLUDE_GIT_DESCRIBE=OFF',
                '-DZ3_BUILD_TEST_EXECUTABLES=OFF', '-DZ3_ENABLE_EXAMPLE_TARGETS=OFF']
     env = dict(os.environ, LC_ALL='C')
     if shutil.which('ccache'):
-        command.append('-DCMAKE_CXX_COMPILER_LAUNCHER=' + shutil.which('ccache'))
+        command.append('-DCMAKE_CXX_COMPILER_LAUNCHER=' + Path(shutil.which('ccache')).as_posix())
         env.setdefault('CCACHE_DIR', str(args.work.resolve() / 'ccache'))
         env.setdefault('CCACHE_BASEDIR', str(source))
         env.setdefault('CCACHE_MAXSIZE', '1G')
     start = time.monotonic()
-    metadata = {'profile': profile, 'source': source_info(source),
-                'compiler': output([compiler, '--version']), 'configure_command': command,
+    if profile == 'msvc':
+        banner = output([compiler, '/?'], stderr=subprocess.STDOUT, errors='replace').splitlines()[0]
+    else:
+        banner = output([compiler, '--version'])
+    metadata = {'profile': profile, 'source': source_info(source), 'host': host_info(),
+                'compiler': banner, 'configure_command': command,
                 'sort_seed': args.sort_seed if profile == 'libcxx-random' else None}
     # A stale success record must not survive a failed incremental rebuild.
     (directory / 'build.json').unlink(missing_ok=True)
@@ -95,16 +132,55 @@ def build(args, profile, jobs):
                                                  '--target', 'shell', '--parallel', str(jobs)])]
     for stage, cmd in commands:
         print(f'{profile}: {stage} (log: {directory / (stage + ".log")})', flush=True)
-        with (directory / (stage + '.log')).open('w') as log:
+        with (directory / (stage + '.log')).open('wb') as log:
             result = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, env=env)
         if result.returncode:
             raise RuntimeError(f'{profile}: {stage} failed; see {directory / (stage + ".log")}')
     if metadata['source'] != source_info(source):
         raise RuntimeError('source changed while building; rebuild before comparing')
     metadata['seconds'] = round(time.monotonic() - start, 2)
-    metadata['binary_sha256'] = digest(directory / 'build/z3')
+    binary = directory / 'build' / ('z3.exe' if os.name == 'nt' else 'z3')
+    metadata['binary_sha256'] = digest(binary)
     write_json(directory / 'build.json', metadata)
-    return f'{profile}={directory / "build/z3"}'
+    return f'{profile}={binary}'
+
+
+def stop_process(child):
+    if os.name == 'nt':
+        # taskkill /T also terminates descendants, unlike Popen.kill on Windows.
+        try:
+            subprocess.run(['taskkill', '/PID', str(child.pid), '/T', '/F'],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        if child.poll() is None:
+            child.kill()
+    else:
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    return child.wait()
+
+
+def output_too_large(directory):
+    return any(p.exists() and p.stat().st_size > MAX_FILE_BYTES
+               for p in (directory / c for c in CHANNELS))
+
+
+def wait_for_run(child, directory, watchdog):
+    deadline = time.monotonic() + watchdog
+    while True:
+        if output_too_large(directory):
+            return stop_process(child), False, True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return stop_process(child), True, False
+        try:
+            code = child.wait(timeout=min(0.1, remaining))
+            return code, False, output_too_large(directory)
+        except subprocess.TimeoutExpired:
+            pass
 
 
 def binaries(entries):
@@ -119,7 +195,7 @@ def binaries(entries):
 
 def run(args, entries):
     variants = binaries(entries)
-    manifest = json.loads(args.corpus.read_text())
+    manifest = read_json(args.corpus)
     cases = manifest['cases']
     if not cases or len({c['file'] for c in cases}) != len(cases):
         raise ValueError('the corpus must be nonempty, with unique input paths')
@@ -138,24 +214,25 @@ def run(args, entries):
               'smt.sls.parallel=false', 'smt.random_seed=0', 'sat.random_seed=0',
               'nlsat.seed=0', 'rlimit=' + str(args.rlimit)]
     env = dict(os.environ, LC_ALL='C', TZ='UTC')
-    # Children inherit these limits. Reaching either guard is an incomplete run,
-    # never a pass. No preexec_fn is used with the thread pool.
-    resource.setrlimit(resource.RLIMIT_FSIZE, (128 * 1024 * 1024, 128 * 1024 * 1024))
-    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    # POSIX children inherit hard limits; Windows uses the polling guard below.
+    # Reaching a guard is an incomplete run. No preexec_fn is used with threads.
+    if os.name != 'nt':
+        resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_FILE_BYTES, MAX_FILE_BYTES))
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     out = args.out.resolve()
     for name, binary in variants.items():
         directory = out / name
         directory.mkdir(parents=True, exist_ok=False)
         build_file = binary.parent.parent / 'build.json'
-        build_metadata = json.loads(build_file.read_text()) if build_file.exists() else None
+        build_metadata = read_json(build_file) if build_file.exists() else None
         binary_hash = digest(binary)
         if build_metadata and build_metadata['binary_sha256'] != binary_hash:
             raise ValueError(f'binary no longer matches its build metadata: {binary}')
         write_json(directory / 'metadata.json', {
-            'profile': name, 'binary': str(binary), 'binary_sha256': binary_hash,
+            'profile': name, 'host': host_info(), 'binary': str(binary), 'binary_sha256': binary_hash,
             'version': output([str(binary), '-version']), 'build': build_metadata,
             'corpus': manifest, 'arguments': common, 'repeats': args.repeats,
-            'watchdog_seconds': args.watchdog, 'max_file_bytes': 128 * 1024 * 1024,
+            'watchdog_seconds': args.watchdog, 'max_file_bytes': MAX_FILE_BYTES,
         })
 
     def execute(task):
@@ -165,20 +242,11 @@ def run(args, entries):
         directory.mkdir(parents=True)
         (directory / 'input.smt2').write_bytes(inputs[index])
         command = [str(variants[name]), *common]
-        timed_out = False
         start = time.monotonic()
         with (directory / 'stdout').open('wb') as stdout, (directory / 'stderr').open('wb') as stderr:
             child = subprocess.Popen(command, cwd=directory, env=env, stdout=stdout, stderr=stderr,
-                                     start_new_session=True)
-            try:
-                code = child.wait(timeout=args.watchdog)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-                try:
-                    os.killpg(child.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                code = child.wait()
+                                     start_new_session=os.name != 'nt')
+            code, timed_out, oversized = wait_for_run(child, directory, args.watchdog)
         trace = directory / 'ast.trace'
         complete_trace = False
         if trace.exists() and trace.stat().st_size >= 6:
@@ -187,10 +255,10 @@ def run(args, entries):
                 stream.seek(-6, 2)
                 complete_trace = header and stream.read() == b'[eof]\n'
         smt_error = bool(re.search(rb'^\(error(?:\s|\))', (directory / 'stdout').read_bytes(), re.M))
-        result = {'case_index': index, 'repeat': repeat, 'directory': str(relative),
-                  'returncode': code, 'watchdog': timed_out, 'smtlib_error': smt_error,
+        result = {'case_index': index, 'repeat': repeat, 'directory': relative.as_posix(),
+                  'returncode': code, 'watchdog': timed_out, 'output_limit': oversized, 'smtlib_error': smt_error,
                   'trace_complete': complete_trace,
-                  'complete': code == 0 and not timed_out and complete_trace and not smt_error,
+                  'complete': code == 0 and not timed_out and not oversized and complete_trace and not smt_error,
                   'seconds': round(time.monotonic() - start, 4),
                   'channels': {c: {'bytes': (directory / c).stat().st_size,
                                    'sha256': digest(directory / c)}
@@ -235,14 +303,14 @@ def compare(inputs, profiles, out):
         candidates = [path] if (path / 'runs.json').exists() else list(path.glob('*/runs.json'))
         for candidate in candidates:
             root = candidate if candidate.is_dir() else candidate.parent
-            metadata = json.loads((root / 'metadata.json').read_text())
+            metadata = read_json(root / 'metadata.json')
             name = metadata['profile']
             if name in roots:
                 raise ValueError(f'duplicate report: {name}')
             roots[name] = root
     if set(roots) != set(profiles):
         raise ValueError(f'expected profiles {profiles}, found {sorted(roots)}')
-    metadata = {name: json.loads((root / 'metadata.json').read_text()) for name, root in roots.items()}
+    metadata = {name: read_json(root / 'metadata.json') for name, root in roots.items()}
     first = metadata[profiles[0]]
     cases, repeats = first['corpus']['cases'], first['repeats']
     if not cases or repeats < 2:
@@ -255,7 +323,7 @@ def compare(inputs, profiles, out):
         if metadata[name]['build'] and first['build']:
             if metadata[name]['build']['source'] != first['build']['source']:
                 raise ValueError(f'different source revisions: {name}')
-        rows = json.loads((root / 'runs.json').read_text())
+        rows = read_json(root / 'runs.json')
         expected = set(itertools.product(range(len(cases)), range(repeats)))
         keys = [(r['case_index'], r['repeat']) for r in rows]
         if len(keys) != len(expected) or set(keys) != expected:
@@ -316,7 +384,7 @@ def compare(inputs, profiles, out):
                 lines += [f'{channel}, line {d.get("line", "missing")}:', '', '```diff',
                           '-' + d.get('left', '<missing>'), '+' + d.get('right', '<missing>'), '```', '']
         lines += ['</details>', '']
-    (out / 'summary.md').write_text('\n'.join(lines) + '\n')
+    (out / 'summary.md').write_text('\n'.join(lines) + '\n', encoding='utf-8', newline='\n')
     print('\n'.join(lines[:len(summary) + 7]))
     print(f'Full report: {out / "summary.md"}')
     return int(bool(failures))
@@ -339,6 +407,7 @@ def main():
             p.add_argument('--work', type=Path, default=Path('build/determinism'))
             p.add_argument('--gcc', default='g++')
             p.add_argument('--clang', default='clang++')
+            p.add_argument('--msvc', default='cl')
             p.add_argument('--libcxx-include', type=Path)
             p.add_argument('--libcxx-lib', type=Path)
             p.add_argument('--sort-seed', type=int, default=1)
@@ -346,7 +415,7 @@ def main():
             p.add_argument('--profile', choices=PROFILES, required=True)
         if name in ('matrix', 'compare'):
             p.add_argument('--profiles', choices=PROFILES if name == 'matrix' else None,
-                           nargs='+', default=list(PROFILES))
+                           nargs='+', default=default_profiles())
         if name in ('run', 'matrix'):
             p.add_argument('--suite', type=Path, required=True)
             p.add_argument('--corpus', type=Path, default=HERE / 'corpus.json')

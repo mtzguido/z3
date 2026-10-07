@@ -40,6 +40,12 @@ Revision History:
 #include "util/file_path.h"
 #include "shell/drat_frontend.h"
 
+#ifdef _WINDOWS
+#include <cstdio>
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 #if defined( _WINDOWS ) && defined( __MINGW32__ ) && ( defined( __GNUG__ ) || defined( __clang__ ) )
 #include <crtdbg.h>
 #endif
@@ -390,6 +396,15 @@ int STD_CALL main(int argc, char ** argv) {
         std::string input_file;
         parse_cmd_line_args(input_file, argc, argv);
         env_params::updt_params();
+
+#ifdef _WINDOWS
+        // Trace comparisons include stdout/stderr; emit LF without CRT translation.
+        if (gparams::get_ref().get_bool("trace", false)) {
+            if (_setmode(_fileno(stdout), _O_BINARY) == -1 ||
+                _setmode(_fileno(stderr), _O_BINARY) == -1)
+                error("could not enable binary output for tracing.");
+        }
+#endif
 
         if (g_input_file && g_standard_input) {
             error("using standard input to read formula.");

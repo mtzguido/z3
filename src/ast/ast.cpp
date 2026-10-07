@@ -1256,7 +1256,8 @@ ast_manager::ast_manager(proof_gen_mode m, char const * trace_file, bool is_form
     m_proof_mode(m) {
 
     if (trace_file && !is_format_manager) {
-        m_trace_stream       = alloc(std::fstream, trace_file, std::ios_base::out);
+        // Keep trace bytes identical on platforms with different text-mode newlines.
+        m_trace_stream       = alloc(std::fstream, trace_file, std::ios_base::out | std::ios_base::binary);
         m_trace_stream_owner = true;
         *m_trace_stream << "[tool-version] Z3 " << Z3_MAJOR_VERSION << "." << Z3_MINOR_VERSION << "." << Z3_BUILD_NUMBER << "\n";
     }

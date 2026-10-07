@@ -16,27 +16,48 @@ concurrency:
 jobs:
   variants:
     name: Trace (${{ matrix.profile }})
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
-        profile: [gcc, clang, libcxx, libcxx-random]
+        include:
+          - {profile: gcc, os: ubuntu-24.04}
+          - {profile: clang, os: ubuntu-24.04}
+          - {profile: libcxx, os: ubuntu-24.04}
+          - {profile: libcxx-random, os: ubuntu-24.04}
+          - {profile: apple-clang, os: macos-15}
+          - {profile: msvc, os: windows-2022}
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache-determinism
       CCACHE_MAXSIZE: 1G
+      PYTHONUTF8: '1'
+      HOMEBREW_NO_AUTO_UPDATE: '1'
     steps:
+      # Corpus hashes describe repository bytes, not a CRLF-converted checkout.
+      - name: Preserve repository line endings
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
       - name: Read the pinned corpus revision
         id: corpus
         run: |
-          python3 - <<'PY'
+          python - <<'PY'
           import json, os
           from pathlib import Path
-          revision = json.loads(Path('scripts/determinism/corpus.json').read_text())['revision']
+          revision = json.loads(Path('scripts/determinism/corpus.json').read_text(encoding='utf-8'))['revision']
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write(f'revision={revision}\n')
           PY
@@ -46,9 +67,11 @@ jobs:
           repository: Z3Prover/z3test
           ref: ${{ steps.corpus.outputs.revision }}
           path: z3test
+          sparse-checkout: regressions/smt2
           persist-credentials: false
 
-      - name: Install compilers and libraries
+      - name: Install Linux compilers and libraries
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y g++-14 clang-18 libc++-18-dev libc++abi-18-dev ninja-build ccache
@@ -56,25 +79,52 @@ jobs:
           clang++-18 --version
           dpkg-query -W g++-14 libstdc++-14-dev clang-18 libc++-18-dev libc++abi-18-dev
 
+      - name: Install macOS build tools
+        if: runner.os == 'macOS'
+        run: |
+          brew install ninja ccache
+          xcodebuild -version
+          /usr/bin/clang++ --version
+
+      - name: Install Windows compiler cache
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install ccache --yes --no-progress
+
       - name: Restore compiler cache
         uses: actions/cache@v5
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: determinism-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.profile }}-gcc14-clang18-${{ hashFiles('scripts/determinism/run.py') }}-${{ github.sha }}
+          key: determinism-v2-${{ runner.os }}-${{ runner.arch }}-${{ matrix.profile }}-${{ hashFiles('scripts/determinism/run.py') }}-${{ github.sha }}
           restore-keys: |
-            determinism-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.profile }}-gcc14-clang18-${{ hashFiles('scripts/determinism/run.py') }}-
+            determinism-v2-${{ runner.os }}-${{ runner.arch }}-${{ matrix.profile }}-${{ hashFiles('scripts/determinism/run.py') }}-
 
       - name: Build Release solver
+        if: runner.os != 'Windows'
         run: |
-          python3 scripts/determinism/run.py build \
+          compilers=(--gcc g++-14 --clang clang++-18)
+          if [[ "$RUNNER_OS" == macOS ]]; then compilers=(--clang /usr/bin/clang++); fi
+          python scripts/determinism/run.py build \
             --profile '${{ matrix.profile }}' --work build/determinism \
-            --gcc g++-14 --clang clang++-18 --sort-seed 1 --jobs "$(nproc)"
+            "${compilers[@]}" --sort-seed 1 --jobs "$(python -c 'import os; print(os.cpu_count() or 1)')"
+
+      - name: Build Release solver with MSVC
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installation = & $vswhere -latest -products '*' -version '[17.0,18.0)' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (!$installation) { throw 'Visual Studio 2022 C++ tools were not found' }
+          & "$installation\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+          python scripts/determinism/run.py build --profile msvc --work build/determinism --jobs $env:NUMBER_OF_PROCESSORS
 
       - name: Run the corpus twice
         run: |
-          python3 scripts/determinism/run.py run --suite z3test --out reports \
-            --binary '${{ matrix.profile }}=build/determinism/${{ matrix.profile }}/build/z3' \
-            --jobs "$(nproc)"
+          executable=z3
+          if [[ "$RUNNER_OS" == Windows ]]; then executable=z3.exe; fi
+          python scripts/determinism/run.py run --suite z3test --out reports \
+            --binary '${{ matrix.profile }}=build/determinism/${{ matrix.profile }}/build/'"$executable" \
+            --jobs "$(python -c 'import os; print(os.cpu_count() or 1)')"
 
       - name: Upload raw runs
         if: always()
@@ -120,7 +170,7 @@ jobs:
       - name: Compare repetitions and configurations
         run: |
           python3 scripts/determinism/run.py compare --input reports --out comparison \
-            --profiles gcc clang libcxx libcxx-random
+            --profiles gcc clang libcxx libcxx-random apple-clang msvc
 
       - name: Publish job summary
         if: always()
