@@ -3,7 +3,7 @@ name: Solver determinism
 on:
   pull_request:
   push:
-    branches: [master]
+    branches: [master, ci/determinism-platforms]
   workflow_dispatch:
 
 permissions:
