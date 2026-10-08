@@ -229,10 +229,46 @@ static void tst_bigint_decompose() {
     }
 }
 
+static void tst_bigint_division_by_zero() {
+    unsynch_mpz_manager m;
+    scoped_mpz numerator(m), zero(m), result(m);
+    for (char const* value : {"0", "1", "-1", "18446744073709551616", "-18446744073709551616"}) {
+        for (bool computed : {false, true}) {
+            for (unsigned alias : {0u, 1u, 2u}) {
+                m.set(numerator, value);
+                m.set(zero, 0);
+                if (computed) {
+                    m.set(zero, "4294967296");
+                    m.sub(zero, zero, zero);
+                }
+                m.set(result, 42);
+                bool rejected = false;
+                try {
+                    if (alias == 0)
+                        m.machine_div(numerator, zero, result);
+                    else if (alias == 1)
+                        m.machine_div(numerator, zero, numerator);
+                    else
+                        m.machine_div(numerator, zero, zero);
+                }
+                catch (default_exception const&) {
+                    rejected = true;
+                }
+                ENSURE(rejected);
+                ENSURE(m.is_zero(zero));
+                ENSURE(m.eq(result, mpz(42)));
+                m.set(result, value);
+                ENSURE(m.eq(numerator, result));
+            }
+        }
+    }
+}
+
 void tst_bigint() {
     tst_bigint_size();
     tst_bigint_logical_shifts();
     tst_bigint_arithmetic_shifts();
     tst_bigint_power();
     tst_bigint_decompose();
+    tst_bigint_division_by_zero();
 }

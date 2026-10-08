@@ -475,7 +475,7 @@ void mpz_manager<SYNCH>::machine_div_rem(mpz const & a, mpz const & b, mpz & q, 
 template<bool SYNCH>
 void mpz_manager<SYNCH>::machine_div(mpz const & a, mpz const & b, mpz & c) {
     STRACE(mpz, tout << "[mpz-ext] machine-div(" << to_string(a) << ",  " << to_string(b) << ") == ";); 
-    if (is_small(b) && i64(b) == 0)
+    if (is_zero(b))
         throw default_exception("division by 0"); 
 
     if (is_small(a) && is_small(b)) 
