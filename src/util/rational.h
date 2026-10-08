@@ -78,7 +78,19 @@ public:
 
     bool is_int() const { return m().is_int(m_val); }
 
-    bool is_small() const { return m().is_small(m_val); }
+    bool is_small() const {
+        if (m().is_small(m_val))
+            return true;
+        // Solver heuristics need a numeric bound: GMP can keep small values
+        // in its large representation after arithmetic on larger operands.
+        auto fits = [](mpz const& n) {
+            if (!m().is_int64(n))
+                return false;
+            int64_t v = m().get_int64(n);
+            return INT_MIN <= v && v <= INT_MAX;
+        };
+        return fits(m_val.numerator()) && fits(m_val.denominator());
+    }
 
     bool is_big() const { return !is_small(); }
     
