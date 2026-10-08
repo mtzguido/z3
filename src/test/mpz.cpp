@@ -25,6 +25,7 @@ Revision History:
 #include <iostream>
 #include <cstring>
 #include <new>
+#include <numeric>
 
 static void tst1() {
     synch_mpz_manager m;
@@ -661,7 +662,49 @@ static void tst_modular_manager_field_status() {
     ENSURE(default_prime_bigint.field());
 }
 
+template<bool SYNCH>
+static void tst_lcm_signs_and_aliases() {
+    mpz_manager<SYNCH> m;
+    _scoped_numeral<mpz_manager<SYNCH>> a(m), b(m), separate(m), expected(m), large(m);
+    m.power(mpz(2), 128, large);
+    for (bool computed : {false, true}) {
+        for (unsigned shift : {0u, 80u}) {
+            for (int av : {-6, -2, -1, 0, 1, 2, 3, 6}) {
+                for (int bv : {-6, -2, -1, 0, 1, 2, 3, 6}) {
+                    m.set(expected, std::lcm(av, bv));
+                    m.mul2k(expected, shift);
+                    for (unsigned alias = 0; alias < 3; ++alias) {
+                        m.set(a, av);
+                        m.set(b, bv);
+                        if (computed) {
+                            m.add(a, large, a);
+                            m.sub(a, large, a);
+                            m.add(b, large, b);
+                            m.sub(b, large, b);
+                        }
+                        m.mul2k(a, shift);
+                        m.mul2k(b, shift);
+                        mpz& output = alias == 0 ? separate.get() : alias == 1 ? a.get() : b.get();
+                        m.lcm(a, b, output);
+                        ENSURE(m.eq(output, expected));
+                        ENSURE(m.is_nonneg(output));
+                    }
+                }
+                m.set(a, av);
+                m.mul2k(a, shift);
+                m.set(expected, a);
+                m.abs(expected);
+                m.lcm(a, a, a);
+                ENSURE(m.eq(a, expected));
+            }
+        }
+    }
+    ENSURE(lcm(rational(-6), rational(4)) == rational(12));
+}
+
 void tst_mpz() {
+    tst_lcm_signs_and_aliases<false>();
+    tst_lcm_signs_and_aliases<true>();
     tst_modular_manager_field_status();
     tst_extended_gcd_aliases<false>();
     tst_extended_gcd_aliases<true>();

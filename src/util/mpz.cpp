@@ -1331,6 +1331,7 @@ void mpz_manager<SYNCH>::lcm(mpz const & a, mpz const & b, mpz & c) {
         }
         del(r);
     }
+    abs(c);
 }
 
 template<bool SYNCH>
