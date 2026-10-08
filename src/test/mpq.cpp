@@ -18,6 +18,7 @@ Revision History:
 --*/
 
 #include "util/mpq.h"
+#include "util/mpq_inf.h"
 #include "util/rational.h"
 #include "util/timeit.h"
 #include "util/z3_exception.h"
@@ -404,7 +405,39 @@ static void tst_set_component_aliases() {
     }
 }
 
+template<bool SYNCH>
+static void tst_infinitesimal_rounding() {
+    mpq_manager<SYNCH> m;
+    mpq_inf_manager<SYNCH> im;
+    _scoped_numeral<mpq_inf_manager<SYNCH>> value(im);
+    _scoped_numeral<mpq_manager<SYNCH>> separate(m);
+    for (int numerator : {-6, -1, 0, 1, 6}) {
+        for (int denominator : {1, 4}) {
+            for (int epsilon : {-5, -1, 0, 1, 5}) {
+                int quotient = numerator / denominator;
+                bool integral = numerator % denominator == 0;
+                int expected_floor = quotient - (!integral && numerator < 0) - (integral && epsilon < 0);
+                int expected_ceil = quotient + (!integral && numerator > 0) + (integral && epsilon > 0);
+                for (unsigned alias = 0; alias < 3; ++alias) {
+                    for (bool ceiling : {false, true}) {
+                        m.set(value.get().first, numerator, denominator);
+                        m.set(value.get().second, epsilon, 3);
+                        mpq& output = alias == 0 ? separate.get() : alias == 1 ? value.get().first : value.get().second;
+                        if (ceiling)
+                            im.ceil(value, output);
+                        else
+                            im.floor(value, output);
+                        ENSURE(m.eq(output, ceiling ? expected_ceil : expected_floor));
+                    }
+                }
+            }
+        }
+    }
+}
+
 void tst_mpq() {
+    tst_infinitesimal_rounding<false>();
+    tst_infinitesimal_rounding<true>();
     tst_set_component_aliases<false>();
     tst_set_component_aliases<true>();
     tst_signed_fraction_endpoints<false>();

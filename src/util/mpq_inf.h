@@ -259,7 +259,7 @@ public:
 
     void floor(mpq_inf const & a, mpq & b) {
         if (m.is_int(a.first)) {
-            if (m.is_neg(a.first))
+            if (m.is_neg(a.second))
                 m.sub(a.first, mpq(1), b); // floor(k - delta*epsilon) --> k-1
             else
                 m.set(b, a.first);
