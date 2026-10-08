@@ -22,6 +22,10 @@ Revision History:
 #include <cmath>
 #include <limits>
 
+// This file uses Z3 rationals. GMP's rational setter macro conflicts with
+// the mpq_set trace tag when tracing is enabled.
+#undef mpq_set
+
 template<bool SYNCH>
 mpq_manager<SYNCH>::~mpq_manager() {
     del(m_tmp1);
