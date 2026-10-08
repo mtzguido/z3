@@ -343,6 +343,42 @@ static void tst_bigint_division_aliases() {
     }
 }
 
+static void tst_bigint_machine_integer_bounds() {
+    unsynch_mpz_manager m;
+    scoped_mpz value(m), restored(m), large(m);
+    m.set(large, "340282366920938463463374607431768211456");
+    struct test_case { char const* value; bool fits_int; bool fits_uint; };
+    for (auto const& test : {
+             test_case{"-9223372036854775809", false, false},
+             {"-9223372036854775808", false, false},
+             {"-2147483649", false, false}, {"-2147483648", true, false},
+             {"-2147483647", true, false}, {"-1", true, false},
+             {"0", true, true}, {"1", true, true},
+             {"2147483646", true, true}, {"2147483647", true, true},
+             {"2147483648", false, true}, {"4294967294", false, true},
+             {"4294967295", false, true}, {"4294967296", false, false},
+             {"9223372036854775807", false, false}, {"9223372036854775808", false, false},
+             {"18446744073709551615", false, false}, {"18446744073709551616", false, false}}) {
+        for (bool computed : {false, true}) {
+            m.set(value, test.value);
+            if (computed) {
+                m.add(value, large, value);
+                m.sub(value, large, value);
+            }
+            ENSURE(m.is_int(value) == test.fits_int);
+            ENSURE(m.is_uint(value) == test.fits_uint);
+            if (test.fits_int) {
+                m.set(restored, m.get_int(value));
+                ENSURE(m.eq(restored, value));
+            }
+            if (test.fits_uint) {
+                m.set(restored, m.get_uint(value));
+                ENSURE(m.eq(restored, value));
+            }
+        }
+    }
+}
+
 void tst_bigint() {
     tst_bigint_size();
     tst_bigint_logical_shifts();
@@ -352,4 +388,5 @@ void tst_bigint() {
     tst_bigint_division_by_zero();
     tst_bigint_bitwise_not();
     tst_bigint_division_aliases();
+    tst_bigint_machine_integer_bounds();
 }
