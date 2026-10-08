@@ -1724,33 +1724,33 @@ void mpz_manager<SYNCH>::display_hex(std::ostream & out, mpz const & a, unsigned
     fmt.copyfmt(out);
     out << std::hex;
     if (is_small(a)) {
-        out << std::setw(num_bits/4) << std::setfill('0') << get_uint64(a);
+        uint64_t value = get_uint64(a);
+        if (num_bits < 64)
+            value &= (uint64_t(1) << num_bits) - 1;
+        if (num_bits)
+            out << std::setw(num_bits/4) << std::setfill('0') << value;
     } else {
 #ifndef _MP_GMP
         digit_t *ds = digits(a);
         unsigned sz = size(a);
-        unsigned bitSize = sz * sizeof(digit_t) * 8;
-        unsigned firstDigitSize;
-        if (num_bits >= bitSize) {
-            firstDigitSize = sizeof(digit_t) * 2;
-
-            for (unsigned i = 0; i < (num_bits - bitSize)/4; ++i) {
-                out << "0";
-            }
-        } else {
-            firstDigitSize = num_bits % (sizeof(digit_t) * 8) / 4;
-        }
-
-        out << std::setfill('0') << std::setw(firstDigitSize) << ds[sz-1] << std::setw(sizeof(digit_t)*2);
-        for (unsigned i = 1; i < sz; ++i) {
-            out << ds[sz-i-1];
+        const unsigned digitBitSize = sizeof(digit_t) * 8;
+        for (unsigned remaining = num_bits; remaining > 0; ) {
+            unsigned index = (remaining - 1) / digitBitSize;
+            unsigned width = remaining - index * digitBitSize;
+            digit_t value = index < sz ? ds[index] : 0;
+            if (width < digitBitSize)
+                value &= (digit_t(1) << width) - 1;
+            // setw applies only to the next insertion: pad every word.
+            out << std::setfill('0') << std::setw(width / 4) << value;
+            remaining -= width;
         }
 #else
         // GMP version
         size_t sz = mpz_sizeinbase(*(a.m_ptr), 16);
         unsigned requiredLength = num_bits / 4;
         unsigned padding = requiredLength > sz ? requiredLength - sz : 0;
-        sbuffer<char, 1024> buffer(sz, 0);
+        // mpz_get_str also writes a terminator and, for negative values, a sign.
+        sbuffer<char, 1024> buffer(sz + 2, 0);
         mpz_get_str(buffer.data(), 16, *(a.m_ptr));
         for (unsigned i = 0; i < padding; ++i) {
             out << "0";
@@ -1783,28 +1783,19 @@ void mpz_manager<SYNCH>::display_bin(std::ostream & out, mpz const & a, unsigned
         digit_t *ds = digits(a);
         unsigned sz = size(a);
         const unsigned digitBitSize = sizeof(digit_t) * 8;
-        unsigned bitSize = sz * digitBitSize;
-        unsigned firstDigitLength;
-        if (num_bits > bitSize) {
-            firstDigitLength = 0;
-            for (unsigned i = 0; i < (num_bits - bitSize); ++i) {
-                out << "0";
-            }
-        } else {
-            firstDigitLength = num_bits % digitBitSize;
-        }
-        for (unsigned i = 0; i < sz; ++i) {
-            if (i == 0 && firstDigitLength != 0) {
-                display_binary_data(out, ds[sz-1], firstDigitLength);
-            } else {
-                display_binary_data(out, ds[sz-i-1], digitBitSize);
-            }
+        // Print exactly the requested low bits, even when a has more words.
+        for (unsigned remaining = num_bits; remaining > 0; ) {
+            unsigned index = (remaining - 1) / digitBitSize;
+            unsigned width = remaining - index * digitBitSize;
+            display_binary_data(out, index < sz ? ds[index] : 0, width);
+            remaining -= width;
         }
 #else
         // GMP version
         size_t sz = mpz_sizeinbase(*(a.m_ptr), 2);
         unsigned padding = num_bits > sz ? num_bits - sz : 0;
-        sbuffer<char, 1024> buffer(sz, 0);
+        // mpz_get_str also writes a terminator and, for negative values, a sign.
+        sbuffer<char, 1024> buffer(sz + 2, 0);
         mpz_get_str(buffer.data(), 2, *(a.m_ptr));
         for (unsigned i = 0; i < padding; ++i) {
             out << "0";
