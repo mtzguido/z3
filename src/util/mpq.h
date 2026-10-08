@@ -681,14 +681,12 @@ public:
 
     void set(mpq & a, int n, int d) {
         SASSERT(d != 0);
-        if (d < 0) {
-            SASSERT(d != INT_MIN);
-            SASSERT(n != INT_MIN);
-            n = -n;
-            d = -d;
-        }
         set(a.m_num, n);
         set(a.m_den, d);
+        if (d < 0) {
+            neg(a.m_num);
+            neg(a.m_den);
+        }
         normalize(a);
     }
 

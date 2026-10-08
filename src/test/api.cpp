@@ -433,7 +433,27 @@ static void test_scientific_exponent_overflow() {
     Z3_del_context(ctx);
 }
 
+static void test_real_signed_endpoints() {
+    Z3_config cfg = Z3_mk_config();
+    Z3_context ctx = Z3_mk_context(cfg);
+    Z3_del_config(cfg);
+    Z3_sort reals = Z3_mk_real_sort(ctx);
+    struct test_case { int numerator; int denominator; char const* expected; };
+    test_case cases[] = {
+        {INT_MIN, -1, "2147483648"}, {1, INT_MIN, "-1/2147483648"},
+        {INT_MIN, INT_MIN, "1"}, {0, INT_MIN, "0"}, {INT_MIN, 2, "-1073741824"}
+    };
+    for (auto const& test : cases) {
+        Z3_ast value = Z3_mk_real(ctx, test.numerator, test.denominator);
+        ENSURE(value && Z3_get_error_code(ctx) == Z3_OK);
+        Z3_ast expected = Z3_mk_numeral(ctx, test.expected, reals);
+        ENSURE(Z3_is_eq_ast(ctx, value, expected));
+    }
+    Z3_del_context(ctx);
+}
+
 void tst_api() {
+    test_real_signed_endpoints();
     test_scientific_exponent_overflow();
     test_large_rational_double();
     test_solver_model_completion();

@@ -364,7 +364,27 @@ static void tst_perfect_square_alias() {
     ENSURE(m.eq(value, 4));
 }
 
+template<bool SYNCH>
+static void tst_signed_fraction_endpoints() {
+    mpq_manager<SYNCH> m;
+    _scoped_numeral<mpq_manager<SYNCH>> value(m);
+    _scoped_numeral<mpz_manager<SYNCH>> lhs(m), rhs(m), gcd(m);
+    for (int numerator : {INT_MIN, INT_MIN + 1, -1, 0, 1, INT_MAX}) {
+        for (int denominator : {INT_MIN, INT_MIN + 1, -1, 1, 2, INT_MAX}) {
+            m.set(value, numerator, denominator);
+            ENSURE(m.is_pos(value.get().denominator()));
+            m.mul(value.get().numerator(), mpz(denominator), lhs);
+            m.mul(value.get().denominator(), mpz(numerator), rhs);
+            ENSURE(m.eq(lhs, rhs));
+            m.gcd(value.get().numerator(), value.get().denominator(), gcd);
+            ENSURE(m.is_one(gcd));
+        }
+    }
+}
+
 void tst_mpq() {
+    tst_signed_fraction_endpoints<false>();
+    tst_signed_fraction_endpoints<true>();
     tst_perfect_square_alias<false>();
     tst_perfect_square_alias<true>();
     tst_parse_reused_rational<false>();
