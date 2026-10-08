@@ -21,6 +21,8 @@ Revision History:
 #include "util/rational.h"
 #include "util/timeit.h"
 #include <iostream>
+#include <cmath>
+#include <limits>
 
 static void tst0() {
     synch_mpq_manager m;
@@ -205,7 +207,87 @@ static void tst_add_sub_aliases() {
     ENSURE(m.is_zero(a) && m.is_int(a));
 }
 
+template<bool SYNCH>
+static void tst_large_double_conversion() {
+    mpq_manager<SYNCH> m;
+    _scoped_numeral<mpq_manager<SYNCH>> value(m);
+    _scoped_numeral<mpz_manager<SYNCH>> n(m), d(m), base(m);
+    auto check = [&](double expected) {
+        for (bool negative : {false, true}) {
+            m.set(value, n, d);
+            if (negative)
+                m.neg(value);
+            double actual = m.get_double(value);
+            ENSURE(actual == (negative ? -expected : expected));
+            ENSURE(std::signbit(actual) == negative);
+        }
+    };
+    for (unsigned bits : {1024u, 2048u}) {
+        m.power(mpz(2), bits, n);
+        m.inc(n);
+        m.add(n, mpz(2), d);
+        check(1.0);
+    }
+    m.power(mpz(2), 1023, n);
+    m.inc(n);
+    m.power(mpz(2), 1024, d);
+    m.add(d, mpz(3), d);
+    check(0.5);
+    m.power(mpz(2), 1024, n);
+    m.inc(n);
+    m.set(d, 3);
+    check(0x1.5555555555555p+1022);
+    m.set(n, 3);
+    m.power(mpz(2), 1024, d);
+    m.inc(d);
+    check(0x1.8p-1023);
+
+    double tiny = std::numeric_limits<double>::denorm_min();
+    m.power(mpz(2), 2048, base);
+    m.power(mpz(2), 2048 + 1075, d);
+    for (int offset : {-1, 0, 1}) {
+        m.add(base, mpz(offset), n);
+        check(offset > 0 ? tiny : 0.0);
+        m.mul(base, mpz(3), n);
+        m.add(n, mpz(offset), n);
+        check(offset < 0 ? tiny : 2 * tiny);
+    }
+    // Values on either side of a rounding midpoint near one. The odd
+    // numerators keep these large fractions from reducing to small integers.
+    m.set(base, uint64_t(9007199254740995ULL)); // 2^53 + 3
+    m.mul2k(base, 2048);
+    m.power(mpz(2), 2048 + 53, d);
+    for (int offset : {-1, 1}) {
+        m.add(base, mpz(offset), n);
+        check(offset < 0 ? 0x1.0000000000001p+0 : 0x1.0000000000002p+0);
+    }
+    // The midpoint between the largest subnormal and the smallest normal.
+    m.set(base, uint64_t(9007199254740991ULL)); // 2^53 - 1
+    m.mul2k(base, 2048);
+    m.power(mpz(2), 2048 + 1075, d);
+    for (int offset : {-1, 0, 1}) {
+        m.add(base, mpz(offset), n);
+        check(offset < 0 ? 0x0.fffffffffffffp-1022 : 0x1p-1022);
+    }
+    // Values just below and above the rounding threshold for infinity.
+    m.set(base, uint64_t(18014398509481983ULL)); // 2^54 - 1
+    m.mul2k(base, 2048 + 970);
+    m.power(mpz(2), 2048, d);
+    for (int offset : {-1, 1}) {
+        m.add(base, mpz(offset), n);
+        check(offset < 0 ? std::numeric_limits<double>::max() : std::numeric_limits<double>::infinity());
+    }
+    m.power(mpz(2), 4096, n);
+    m.inc(n);
+    m.set(d, 3);
+    check(std::numeric_limits<double>::infinity());
+    m.swap(n, d);
+    check(0.0);
+}
+
 void tst_mpq() {
+    tst_large_double_conversion<false>();
+    tst_large_double_conversion<true>();
     tst_add_sub_aliases<false>();
     tst_add_sub_aliases<true>();
     tst_prev_power_2();

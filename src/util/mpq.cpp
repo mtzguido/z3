@@ -19,6 +19,8 @@ Revision History:
 #include "util/mpq.h"
 #include "util/warning.h"
 #include "util/z3_exception.h"
+#include <cmath>
+#include <limits>
 
 template<bool SYNCH>
 mpq_manager<SYNCH>::~mpq_manager() {
@@ -323,12 +325,56 @@ void mpq_manager<SYNCH>::power(mpq const & a, unsigned p, mpq & b) {
 
 template<bool SYNCH>
 double mpq_manager<SYNCH>::get_double(mpq const & a) const {
-    double   n;
-    double   d;
-    n = get_double(a.m_num);
-    d = get_double(a.m_den);
+    double n = get_double(a.m_num);
+    double d = get_double(a.m_den);
     SASSERT(d > 0.0);
-    return n/d;
+    if (std::isfinite(n) && std::isfinite(d))
+        return n/d;
+
+    // A finite ratio can have overflowing numerator and denominator. Divide
+    // scaled integers in that case, retaining the remainder for rounding.
+    unsynch_mpz_manager m;
+    scoped_mpz num(m), den(m), tmp(m), quotient(m), remainder(m);
+    bool negative = m.is_neg(a.m_num);
+    auto signed_result = [negative](double v) { return negative ? -v : v; };
+    double inf = std::numeric_limits<double>::infinity();
+    int64_t exponent = static_cast<int64_t>(m.bitsize(a.m_num)) - m.bitsize(a.m_den);
+    if (exponent > 1024)
+        return signed_result(inf);
+    if (exponent < -1075)
+        return signed_result(0.0);
+    m.set(num, a.m_num);
+    m.abs(num);
+    m.set(den, a.m_den);
+    // The difference in bit lengths is either floor(log2(num/den)) or one more.
+    if (exponent >= 0) {
+        m.mul2k(den, static_cast<unsigned>(exponent), tmp);
+        if (m.lt(num, tmp))
+            --exponent;
+    }
+    else {
+        m.mul2k(num, static_cast<unsigned>(-exponent), tmp);
+        if (m.lt(tmp, den))
+            --exponent;
+    }
+    if (exponent >= 1024)
+        return signed_result(inf);
+    if (exponent < -1075)
+        return signed_result(0.0);
+    // Normal values have 53 significant bits; subnormals use a fixed 2^-1074 unit.
+    int scale = exponent < -1022 ? 1074 : 52 - static_cast<int>(exponent);
+    if (scale >= 0)
+        m.mul2k(num, static_cast<unsigned>(scale));
+    else
+        m.mul2k(den, static_cast<unsigned>(-scale));
+    m.machine_div_rem(num, den, quotient, remainder);
+    m.mul2k(remainder, 1);
+    if (m.gt(remainder, den) || (m.eq(remainder, den) && m.is_odd(quotient)))
+        m.inc(quotient); // nearest, ties to even
+    uint64_t significand = m.get_uint64(quotient);
+    if (exponent == 1023 && significand == (uint64_t(1) << 53))
+        return signed_result(inf);
+    return signed_result(std::ldexp(static_cast<double>(significand), -scale));
 }
 
 template<bool SYNCH>

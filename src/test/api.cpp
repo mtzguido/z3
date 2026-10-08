@@ -8,6 +8,7 @@ Copyright (c) 2015 Microsoft Corporation
 #include "api/z3_private.h"
 #include <iostream>
 #include "util/util.h"
+#include "util/mpq.h"
 #include "util/trace.h"
 #include <map>
 #include <string>
@@ -394,7 +395,29 @@ void test_strict_real_maximize_disjunction() {
 // process-global allocated memory, so the work reaching the factorizer depends
 // on machine load and on whatever ran earlier in the same process.
 
+static void test_large_rational_double() {
+    Z3_config cfg = Z3_mk_config();
+    Z3_context ctx = Z3_mk_context(cfg);
+    Z3_del_config(cfg);
+    Z3_sort reals = Z3_mk_real_sort(ctx);
+    unsynch_mpq_manager m;
+    scoped_mpz n(m), d(m);
+    m.power(mpz(2), 1024, d);
+    m.add(d, mpz(3), d);
+    for (unsigned exponent : {1024u, 1023u}) {
+        m.power(mpz(2), exponent, n);
+        m.inc(n);
+        std::string text = m.to_string(n) + "/" + m.to_string(d);
+        Z3_ast value = Z3_mk_numeral(ctx, text.c_str(), reals);
+        ENSURE(value);
+        ENSURE(Z3_get_numeral_double(ctx, value) == (exponent == 1024 ? 1.0 : 0.5));
+        ENSURE(Z3_get_error_code(ctx) == Z3_OK);
+    }
+    Z3_del_context(ctx);
+}
+
 void tst_api() {
+    test_large_rational_double();
     test_solver_model_completion();
     test_apps();
     test_mk_app_polymorphic_arity();
