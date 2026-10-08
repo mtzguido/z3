@@ -124,7 +124,38 @@ static void tst_bigint_logical_shifts() {
     }
 }
 
+static void tst_bigint_arithmetic_shifts() {
+    struct test_case { unsigned width; char const* value; char const* shift; char const* result; };
+    for (auto const& test : {
+             test_case{64, "8", "0", "8"}, {64, "8", "1", "4"},
+             {64, "8", "63", "0"}, {64, "8", "64", "0"},
+             {64, "8", "18446744073709551615", "0"},
+             {64, "18446744073709551608", "0", "18446744073709551608"},
+             {64, "18446744073709551608", "1", "18446744073709551612"},
+             {64, "18446744073709551608", "63", "18446744073709551615"},
+             {64, "18446744073709551608", "64", "18446744073709551615"},
+             {64, "18446744073709551608", "18446744073709551615", "18446744073709551615"},
+             {96, "8", "18446744073709551616", "0"},
+             {96, "39614081257132168796771975168", "18446744073709551616", "79228162514264337593543950335"},
+             {1, "1", "0", "1"}, {1, "1", "1", "1"}}) {
+        check_bigint_shift(test.width, OP_BASHR, test.value, test.shift, test.result);
+    }
+    for (unsigned width : {8u, 31u, 32u}) {
+        int64_t modulus = int64_t(1) << width;
+        for (int64_t value : {-modulus / 2, int64_t(-3), int64_t(-1), int64_t(0), int64_t(1), modulus / 2 - 1}) {
+            for (unsigned shift : {0u, 1u, width - 1, width, width + 1}) {
+                // Arithmetic shift rounds signed division toward negative infinity.
+                int64_t divisor = int64_t(1) << shift;
+                int64_t expected = value / divisor - (value % divisor < 0 ? 1 : 0);
+                check_bigint_shift(width, OP_BASHR, std::to_string((value + modulus) % modulus).c_str(),
+                                  std::to_string(shift).c_str(), std::to_string((expected + modulus) % modulus).c_str());
+            }
+        }
+    }
+}
+
 void tst_bigint() {
     tst_bigint_size();
     tst_bigint_logical_shifts();
+    tst_bigint_arithmetic_shifts();
 }

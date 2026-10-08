@@ -433,19 +433,24 @@ public:
             case OP_BASHR: {
                 SASSERT(n_args == 2);
                 m_mpz_manager.set(result, m_tracker.get_value(args[0]));
-                mpz first;
-                const mpz & p = m_powers(m_bv_util.get_bv_size(args[0])-1);
-                m_mpz_manager.bitwise_and(result, p, first);
-                mpz shift; m_mpz_manager.set(shift, m_tracker.get_value(args[1]));
-                mpz temp;
-                while (!m_mpz_manager.is_zero(shift)) {
-                    m_mpz_manager.machine_div(result, m_two, temp);
-                    m_mpz_manager.add(temp, first, result);
-                    m_mpz_manager.dec(shift);
+                unsigned sz = m_bv_util.get_bv_size(n);
+                bool negative = m_mpz_manager.get_bit(result, sz - 1);
+                auto const& shift = m_tracker.get_value(args[1]);
+                if (!m_mpz_manager.is_uint64(shift) || m_mpz_manager.get_uint64(shift) >= sz) {
+                    if (negative)
+                        m_mpz_manager.sub(m_powers(sz), m_one, result);
+                    else
+                        m_mpz_manager.set(result, m_zero);
                 }
-                m_mpz_manager.del(first);                 
-                m_mpz_manager.del(shift);
-                m_mpz_manager.del(temp);
+                else {
+                    unsigned s = static_cast<unsigned>(m_mpz_manager.get_uint64(shift));
+                    m_mpz_manager.machine_div2k(result, s);
+                    if (negative) {
+                        scoped_mpz extension(m_mpz_manager);
+                        m_mpz_manager.sub(m_powers(sz), m_powers(sz - s), extension);
+                        m_mpz_manager.add(result, extension, result);
+                    }
+                }
                 break;
             }
             case OP_BLSHR: {
