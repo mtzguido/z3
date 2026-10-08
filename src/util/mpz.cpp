@@ -1899,15 +1899,15 @@ void mpz_manager<SYNCH>::power(mpz const & a, unsigned p, mpz & b) {
     }
 #endif
     // general purpose
-    unsigned mask = 1;
     mpz power;
     set(power, a);
     set(b, 1);
-    while (mask <= p) {
-        if (mask & p)
+    while (p != 0) {
+        if (p & 1)
             mul(b, power, b);
-        mul(power, power, power);
-        mask = mask << 1;
+        p >>= 1;
+        if (p != 0)
+            mul(power, power, power);
     }
     del(power);
 }

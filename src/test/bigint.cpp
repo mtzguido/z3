@@ -154,8 +154,47 @@ static void tst_bigint_arithmetic_shifts() {
     }
 }
 
+static void tst_bigint_power() {
+    unsynch_mpz_manager m;
+    scoped_mpz base(m), result(m), large(m), expected(m);
+    m.set(large, "4294967296");
+    for (int value : {-1, 0, 1}) {
+        for (unsigned exponent : {0u, 1u, 2u, 63u, 64u, static_cast<unsigned>(INT_MAX),
+                                  static_cast<unsigned>(INT_MAX) + 1, UINT_MAX - 1, UINT_MAX}) {
+            if (value == 0 && exponent == 0)
+                continue;
+            int wanted = exponent == 0 ? 1 : value == -1 && exponent % 2 == 0 ? 1 : value;
+            for (bool computed : {false, true}) {
+                m.set(base, value);
+                if (computed) {
+                    m.add(base, large, base);
+                    m.sub(base, large, base);
+                }
+                m.power(base, exponent, result);
+                ENSURE(m.eq(result, mpz(wanted)));
+                m.power(base, exponent, base);
+                ENSURE(m.eq(base, result));
+            }
+        }
+    }
+    struct test_case { char const* base; unsigned exponent; char const* result; };
+    for (auto const& test : {
+             test_case{"-3", 31, "-617673396283947"}, {"3", 32, "1853020188851841"},
+             {"-2", 32, "4294967296"}, {"2", 33, "8589934592"},
+             {"4294967297", 0, "1"}, {"4294967297", 1, "4294967297"},
+             {"4294967297", 2, "18446744082299486209"}}) {
+        m.set(base, test.base);
+        m.set(expected, test.result);
+        m.power(base, test.exponent, result);
+        ENSURE(m.eq(result, expected));
+        m.power(base, test.exponent, base);
+        ENSURE(m.eq(base, expected));
+    }
+}
+
 void tst_bigint() {
     tst_bigint_size();
     tst_bigint_logical_shifts();
     tst_bigint_arithmetic_shifts();
+    tst_bigint_power();
 }
