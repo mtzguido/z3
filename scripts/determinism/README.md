@@ -84,7 +84,9 @@ bounded by `--jobs`, divided among the selected configurations. `CCACHE_DIR` and
 `CCACHE_MAXSIZE` can override the local cache defaults. Use a separate `--work`
 directory when switching compiler or library installations.
 
-To use existing binaries:
+To use existing binaries, build both `shell` and `test-z3` with
+`Z3_BUILD_TEST_EXECUTABLES=ON`. Each solver must have its matching `test-z3`
+(`test-z3.exe` on Windows) in the same directory:
 
 ```sh
 python3 scripts/determinism/run.py run --suite ../z3test --out /tmp/z3-runs \
@@ -99,6 +101,12 @@ python3 scripts/determinism/run.py compare --input /tmp/z3-runs \
 
 ## What is checked
 
+Before the SMT corpus, every configuration runs `test-z3 /seq` with the
+`bigint`, `mpz`, `rational`, `mpq`, `mpbq`, `mpf`, `mpfx`, `mpff`, `fpa`, and `api`
+groups. These cover the arithmetic/API regressions, including aliasing and storage
+histories that SMT-LIB cannot express. A failure or 120-second timeout stops the run.
+Output is saved in `arithmetic-tests.log`; it includes timings and is not compared.
+
 The committed manifest selects 100 files from a pinned Z3Prover/z3test revision.
 The sample takes ten files per syntactic
 category (arrays, bitvectors, datatypes, floating point, linear arithmetic,
@@ -110,7 +118,9 @@ manifest of the same form. Editing a testcase does not require updating its entr
 To use newer testcases in CI, update the pinned revision; add or remove paths when
 changing which cases run.
 
-The manifest also includes miscellaneous testcases from `cases/`.
+The manifest also includes testcases from `cases/`: random seeds, bigint
+floating-point exponents, signed division and large bitvector shifts, and rational
+boundaries. These use the same tracing, limits, and repetitions as the pinned suite.
 
 Every run uses a fresh process, a private directory, identical input bytes,
 fixed default solver seeds, single-threaded solving, and `LC_ALL=C`. Three files are
@@ -127,8 +137,8 @@ The watchdog kills the process group on POSIX and the process tree on Windows.
 A run must exit zero, produce no SMT-LIB error, and end its trace with `[eof]`
 followed by LF or CRLF. Timeouts, crashes, truncated output, missing artifacts,
 and incompatible run settings cannot pass. A completed
-`unknown` answer is compared like any other answer; this is a determinism check,
-not an expected-answer regression suite.
+`unknown` answer is compared like any other answer. The SMT corpus checks
+determinism; the arithmetic/API tests check known answers.
 
 The report contains exact-match counts and the first differing lines, and case identifiers
 for the preserved inputs and logs. It displays remaining carriage returns as `\r`;

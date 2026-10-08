@@ -103,6 +103,9 @@
     {"file": "regressions/smt2/string13.smt2", "category": "strings-sequences"},
     {"file": "regressions/smt2/issue2301.smt2", "category": "strings-sequences"},
     {"file": "regressions/smt2/3911.smt2", "category": "strings-sequences"},
-    {"file": "cases/random-seed.smt2", "category": "parameters", "source": "local"}
+    {"file": "cases/random-seed.smt2", "category": "parameters", "source": "local"},
+    {"file": "cases/bigint-floating-exponents.smt2", "category": "floating-point", "source": "local"},
+    {"file": "cases/bigint-integer-boundaries.smt2", "category": "linear-arithmetic", "source": "local"},
+    {"file": "cases/bigint-rational-boundaries.smt2", "category": "linear-arithmetic", "source": "local"}
   ]
 }

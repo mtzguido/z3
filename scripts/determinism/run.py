@@ -28,6 +28,7 @@ LINUX_PROFILES = ('gcc', 'gcc-gmp', 'gcc-unsigned-char', 'clang', 'libcxx', 'lib
 PROFILES = (*LINUX_PROFILES, 'apple-clang', 'msvc')
 CHANNELS = ('ast.trace', 'stdout', 'stderr')
 MAX_FILE_BYTES = 128 * 1024 * 1024
+ARITHMETIC_TESTS = ('bigint', 'mpz', 'rational', 'mpq', 'mpbq', 'mpf', 'mpfx', 'mpff', 'fpa', 'api')
 
 
 def default_profiles():
@@ -115,7 +116,7 @@ def build(args, profile, jobs):
                '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON',
                '-DZ3_USE_LIB_GMP=' + ('ON' if profile == 'gcc-gmp' else 'OFF'),
                '-DZ3_INCLUDE_GIT_HASH=OFF', '-DZ3_INCLUDE_GIT_DESCRIBE=OFF',
-               '-DZ3_BUILD_TEST_EXECUTABLES=OFF', '-DZ3_ENABLE_EXAMPLE_TARGETS=OFF']
+               '-DZ3_BUILD_TEST_EXECUTABLES=ON', '-DZ3_ENABLE_EXAMPLE_TARGETS=OFF']
     env = dict(os.environ, LC_ALL='C')
     if shutil.which('ccache'):
         command.append('-DCMAKE_CXX_COMPILER_LAUNCHER=' + Path(shutil.which('ccache')).as_posix())
@@ -133,7 +134,7 @@ def build(args, profile, jobs):
     # A stale success record must not survive a failed incremental rebuild.
     (directory / 'build.json').unlink(missing_ok=True)
     commands = [('configure', command), ('build', ['cmake', '--build', str(directory / 'build'),
-                                                 '--target', 'shell', '--parallel', str(jobs)])]
+                                                 '--target', 'shell', 'test-z3', '--parallel', str(jobs)])]
     for stage, cmd in commands:
         print(f'{profile}: {stage} (log: {directory / (stage + ".log")})', flush=True)
         with (directory / (stage + '.log')).open('wb') as log:
@@ -233,6 +234,12 @@ def run(args, entries):
         binary_hash = digest(binary)
         if build_metadata and build_metadata['binary_sha256'] != binary_hash:
             raise ValueError(f'binary no longer matches its build metadata: {binary}')
+        test_binary = binary.with_name('test-z3.exe' if os.name == 'nt' else 'test-z3')
+        print(f'{name}: checking arithmetic regressions (log: {directory / "arithmetic-tests.log"})', flush=True)
+        with (directory / 'arithmetic-tests.log').open('wb') as log:
+            subprocess.run([str(test_binary), '/seq', *ARITHMETIC_TESTS],
+                           cwd=directory, env=env, stdout=log, stderr=subprocess.STDOUT,
+                           check=True, timeout=120)
         write_json(directory / 'metadata.json', {
             'profile': name, 'host': host_info(), 'binary': str(binary), 'binary_sha256': binary_hash,
             'version': output([str(binary), '-version']), 'build': build_metadata,
@@ -465,6 +472,6 @@ def main():
 if __name__ == '__main__':
     try:
         sys.exit(main())
-    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         print(f'error: {error}', file=sys.stderr)
         sys.exit(2)
