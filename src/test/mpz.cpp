@@ -18,10 +18,13 @@ Revision History:
 --*/
 
 #include "util/mpz.h"
+#include "util/mpzzp.h"
 #include "util/rational.h"
 #include "util/timeit.h"
 #include "util/scoped_numeral.h"
 #include <iostream>
+#include <cstring>
+#include <new>
 
 static void tst1() {
     synch_mpz_manager m;
@@ -622,7 +625,44 @@ static void tst_extended_gcd_aliases() {
     }
 }
 
+static void tst_modular_manager_field_status() {
+    unsynch_mpz_manager integers;
+    scoped_mpz modulus(integers);
+    // Exercise both zero and nonzero prior storage so an uninitialized flag
+    // cannot happen to match the requested field status.
+    for (unsigned char fill : {0, 0xff}) {
+        for (bool prime : {false, true}) {
+            uint64_t p = prime ? 7 : 9;
+            integers.set(modulus, p);
+            for (bool bigint_modulus : {false, true}) {
+                alignas(mpzzp_manager) unsigned char storage[sizeof(mpzzp_manager)];
+                std::memset(storage, fill, sizeof(storage));
+                mpzzp_manager* m = bigint_modulus
+                    ? new (storage) mpzzp_manager(integers, modulus, prime)
+                    : new (storage) mpzzp_manager(integers, p, prime);
+                ENSURE(m->finite() && m->modular());
+                ENSURE(m->field() == prime);
+                m->set_z();
+                ENSURE(!m->field() && !m->finite());
+                m->set_zp(7);
+                ENSURE(m->field());
+                m->set_p_sq();
+                ENSURE(!m->field() && m->finite());
+                m->~mpzzp_manager();
+            }
+        }
+    }
+    integers.set(modulus, 7);
+    mpzzp_manager default_integer_ring(integers);
+    mpzzp_manager default_prime_word(integers, uint64_t(7));
+    mpzzp_manager default_prime_bigint(integers, modulus);
+    ENSURE(!default_integer_ring.field());
+    ENSURE(default_prime_word.field());
+    ENSURE(default_prime_bigint.field());
+}
+
 void tst_mpz() {
+    tst_modular_manager_field_status();
     tst_extended_gcd_aliases<false>();
     tst_extended_gcd_aliases<true>();
     tst_perfect_square_alias<false>();

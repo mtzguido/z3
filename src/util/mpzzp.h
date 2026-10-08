@@ -34,7 +34,7 @@ class mpzzp_manager {
     bool m_z;
     // instead the usual [0..p) we will keep the numbers in [lower, upper]
     mpz  m_p, m_lower, m_upper; 
-    bool m_p_prime;
+    bool m_p_prime = false;
     mpz  m_inv_tmp1, m_inv_tmp2, m_inv_tmp3;
     mpz  m_div_tmp;
 
@@ -81,14 +81,16 @@ public:
     
     mpzzp_manager(numeral_manager & _m, mpz const &  p, bool prime = true):
         m_manager(_m),
-        m_z(false) {
+        m_z(false),
+        m_p_prime(prime) {
         m().set(m_p, p);
         setup_p();
     }
 
     mpzzp_manager(numeral_manager & _m, uint64_t p, bool prime = true):
         m_manager(_m),
-        m_z(false) {
+        m_z(false),
+        m_p_prime(prime) {
         m().set(m_p, p);
         setup_p();
     }
