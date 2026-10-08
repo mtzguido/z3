@@ -111,9 +111,112 @@ static void test_to_sbv_mpq() {
     ENSURE(fm.mpq_manager().is_zero(r));
 }
 
+static void test_set_bigint_exponent() {
+    mpf_manager fm;
+    auto& qm = fm.mpq_manager();
+    scoped_mpz exponent(qm), large(qm);
+    scoped_mpq significand(qm);
+    scoped_mpf actual(fm), expected(fm);
+    qm.set(large, "340282366920938463463374607431768211456");
+    for (unsigned ebits : {8u, 11u, 63u}) {
+        for (int64_t e : {int64_t(-17), int64_t(-1), int64_t(0), int64_t(1), int64_t(17),
+                          int64_t(INT_MIN) - 1, int64_t(INT_MAX) + 1}) {
+            if (e < fm.mk_min_exp(ebits) || e > fm.mk_max_exp(ebits))
+                continue;
+            for (bool negative : {false, true}) {
+                qm.set(significand, negative ? -1 : 1);
+                fm.set(expected, ebits, 24, negative, e, uint64_t(0));
+                for (bool computed : {false, true}) {
+                    qm.set(exponent, e);
+                    if (computed) {
+                        qm.add(exponent, large, exponent);
+                        qm.sub(exponent, large, exponent);
+                    }
+                    fm.set(actual, ebits, 24, MPF_ROUND_NEAREST_TEVEN, exponent, significand);
+                    ENSURE(fm.eq_core(actual, expected));
+                }
+            }
+        }
+    }
+}
+
+static void test_set_extreme_exponents() {
+    mpf_manager fm;
+    auto& qm = fm.mpq_manager();
+    scoped_mpz exponent(qm), large(qm);
+    scoped_mpq significand(qm);
+    scoped_mpf actual(fm), expected(fm);
+    qm.set(large, "340282366920938463463374607431768211456");
+    struct format { unsigned ebits, sbits; };
+    for (auto f : {format{2, 2}, {8, 24}, {11, 53}, {63, 24}}) {
+        for (auto rm : {MPF_ROUND_NEAREST_TEVEN, MPF_ROUND_NEAREST_TAWAY, MPF_ROUND_TOWARD_POSITIVE,
+                        MPF_ROUND_TOWARD_NEGATIVE, MPF_ROUND_TOWARD_ZERO}) {
+            for (bool negative : {false, true}) {
+                qm.set(significand, negative ? -1 : 1);
+                bool away = negative ? rm == MPF_ROUND_TOWARD_NEGATIVE : rm == MPF_ROUND_TOWARD_POSITIVE;
+                bool nearest = rm == MPF_ROUND_NEAREST_TEVEN || rm == MPF_ROUND_NEAREST_TAWAY;
+                for (bool overflow : {false, true}) {
+                    if (overflow) {
+                        if (away || nearest)
+                            fm.mk_inf(f.ebits, f.sbits, negative, expected);
+                        else
+                            fm.mk_max_value(f.ebits, f.sbits, negative, expected);
+                    }
+                    else if (away)
+                        fm.set(expected, f.ebits, f.sbits, negative, fm.mk_bot_exp(f.ebits), uint64_t(1));
+                    else
+                        fm.mk_zero(f.ebits, f.sbits, negative, expected);
+
+                    // The first exponent is just beyond the relevant format boundary;
+                    // the others reach or exceed the signed 64-bit conversion bounds.
+                    std::string boundary = std::to_string(overflow ? fm.mk_max_exp(f.ebits) + 1 :
+                                                          fm.mk_min_exp(f.ebits) - f.sbits - 1);
+                    for (char const* e : {boundary.c_str(), overflow ? "9223372036854775807" : "-9223372036854775808",
+                                          overflow ? "18446744073709551616" : "-18446744073709551616"}) {
+                        for (bool computed : {false, true}) {
+                            qm.set(exponent, e);
+                            if (computed) {
+                                qm.add(exponent, large, exponent);
+                                qm.sub(exponent, large, exponent);
+                            }
+                            fm.set(actual, f.ebits, f.sbits, rm, exponent, significand);
+                            ENSURE(fm.eq_core(actual, expected));
+                        }
+                    }
+                }
+                // Exercise both sides of, and exactly at, half the least subnormal.
+                for (int numerator : {1, 2, 3, 4}) {
+                    qm.set(significand, negative ? -numerator : numerator, 2);
+                    bool up = numerator == 4 || away ||
+                        (numerator == 3 && nearest) || (numerator == 2 && rm == MPF_ROUND_NEAREST_TAWAY);
+                    if (up)
+                        fm.set(expected, f.ebits, f.sbits, negative, fm.mk_bot_exp(f.ebits), uint64_t(1));
+                    else
+                        fm.mk_zero(f.ebits, f.sbits, negative, expected);
+                    for (bool computed : {false, true}) {
+                        qm.set(exponent, fm.mk_min_exp(f.ebits) - f.sbits);
+                        if (computed) {
+                            qm.add(exponent, large, exponent);
+                            qm.sub(exponent, large, exponent);
+                        }
+                        fm.set(actual, f.ebits, f.sbits, rm, exponent, significand);
+                        ENSURE(fm.eq_core(actual, expected));
+                    }
+                }
+            }
+        }
+    }
+    // Zero stays zero regardless of an otherwise overflowing exponent.
+    qm.set(significand, 0);
+    fm.set(actual, 11, 53, MPF_ROUND_NEAREST_TEVEN, large, significand);
+    ENSURE(fm.is_pzero(actual));
+}
+
 void tst_mpf() {
     // enable_trace("mpf_mul_bug");
     bug_set_int();
     bug_set_double();
     test_to_sbv_mpq();
+    test_set_bigint_exponent();
+    test_set_extreme_exponents();
 }

@@ -266,11 +266,20 @@ void mpf_manager::set(mpf & o, unsigned ebits, unsigned sbits, mpf_rounding_mode
         // Check that 1.0 <= sig < 2.0
         SASSERT((m_mpq_manager.le(1, sig) && m_mpq_manager.lt(sig, 2)));
 
-        if (m_mpz_manager.is_int64(exp) &&
-            m_mpz_manager.get_int64(exp) > mk_max_exp(ebits)) {
+        scoped_mpz bound(m_mpz_manager);
+        m_mpz_manager.set(bound, mk_max_exp(ebits));
+        if (m_mpz_manager.gt(exp, bound)) {
             mk_round_inf(rm, o);
             return;
         }
+
+        // Below half the least subnormal, all nonzero magnitudes round alike
+        // for a fixed sign. Clamp the exponent before narrowing it so even
+        // enormous negative exponents are safe in round's machine arithmetic.
+        mpf_exp_t min_exp = mk_min_exp(ebits) - sbits - 1;
+        m_mpz_manager.set(bound, min_exp);
+        if (m_mpz_manager.lt(exp, bound))
+            m_mpz_manager.set(exp, bound);
 
         scoped_mpz p(m_mpq_manager);
         scoped_mpq t(m_mpq_manager), sq(m_mpq_manager);
@@ -288,12 +297,8 @@ void mpf_manager::set(mpf & o, unsigned ebits, unsigned sbits, mpf_rounding_mode
         TRACE(mpf_dbg, tout << "sig = " << m_mpz_manager.to_string(o.significand) <<
                                  " exp = " << o.exponent << std::endl;);
 
-        if (m_mpz_manager.is_small(exp)) {
-            o.exponent = m_mpz_manager.get_int64(exp);
-            round(rm, o);
-        }
-        else
-            mk_inf(ebits, sbits, o.sign, o);
+        o.exponent = m_mpz_manager.get_int64(exp);
+        round(rm, o);
     }
 
     TRACE(mpf_dbg, tout << "set: res = " << to_string(o) << std::endl;);

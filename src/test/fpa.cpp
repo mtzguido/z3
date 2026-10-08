@@ -180,7 +180,33 @@ static void test_to_fp_real_zero_sign() {
     Z3_del_context(ctx);
 }
 
+static void test_to_fp_bigint_exponent() {
+    Z3_config cfg = Z3_mk_config();
+    Z3_context ctx = Z3_mk_context(cfg);
+    Z3_del_config(cfg);
+
+    // Computing a small exponent using bigints must not turn a finite result
+    // into infinity. Extreme exponents must still respect the rounding mode.
+    char const* spec =
+        "(assert (or\n"
+        "  (not (= ((_ to_fp 11 53) RNE 1.0 (- 4294967313 4294967296))\n"
+        "          ((_ to_fp 11 53) #x4100000000000000)))\n"
+        "  (not (= ((_ to_fp 11 53) RNE 1.0 (- 2147483649)) (_ +zero 11 53)))\n"
+        "  (not (= ((_ to_fp 11 53) RTZ 1.0 18446744073709551616)\n"
+        "          ((_ to_fp 11 53) #x7fefffffffffffff)))\n"
+        "  (not (= ((_ to_fp 11 53) RTN (- 1.0) (- 18446744073709551616))\n"
+        "          ((_ to_fp 11 53) #x8000000000000001)))))\n"
+        "(check-sat)\n";
+
+    std::string response = Z3_eval_smtlib2_string(ctx, spec);
+    if (response != "unsat\n")
+        std::cout << response << "\n";
+    ENSURE(response == "unsat\n");
+    Z3_del_context(ctx);
+}
+
 void tst_fpa() {
+    test_to_fp_bigint_exponent();
     test_rem_subnormal_divisor();
     test_is_inf_large_significand();
     test_significand_out_of_range();
