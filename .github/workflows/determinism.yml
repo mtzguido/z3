@@ -28,6 +28,7 @@ jobs:
       matrix:
         include:
           - {profile: gcc, os: ubuntu-24.04}
+          - {profile: gcc-gmp, os: ubuntu-24.04}
           - {profile: gcc-unsigned-char, os: ubuntu-24.04}
           - {profile: clang, os: ubuntu-24.04}
           - {profile: libcxx, os: ubuntu-24.04}
@@ -77,10 +78,10 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y g++-14 clang-18 libc++-18-dev libc++abi-18-dev ninja-build ccache
+          sudo apt-get install -y g++-14 clang-18 libc++-18-dev libc++abi-18-dev libgmp-dev ninja-build ccache
           g++-14 --version
           clang++-18 --version
-          dpkg-query -W g++-14 libstdc++-14-dev clang-18 libc++-18-dev libc++abi-18-dev
+          dpkg-query -W g++-14 libstdc++-14-dev clang-18 libc++-18-dev libc++abi-18-dev libgmp-dev
 
       - name: Install macOS build tools
         if: runner.os == 'macOS'
@@ -173,7 +174,7 @@ jobs:
       - name: Compare repetitions and configurations
         run: |
           python3 scripts/determinism/run.py compare --input reports --out comparison \
-            --profiles gcc gcc-unsigned-char clang libcxx libcxx-random apple-clang msvc
+            --profiles gcc gcc-gmp gcc-unsigned-char clang libcxx libcxx-random apple-clang msvc
 
       - name: Publish job summary
         if: always()

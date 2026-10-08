@@ -24,7 +24,7 @@ if os.name != 'nt':
     import resource
 
 HERE = Path(__file__).resolve().parent
-LINUX_PROFILES = ('gcc', 'gcc-unsigned-char', 'clang', 'libcxx', 'libcxx-random')
+LINUX_PROFILES = ('gcc', 'gcc-gmp', 'gcc-unsigned-char', 'clang', 'libcxx', 'libcxx-random')
 PROFILES = (*LINUX_PROFILES, 'apple-clang', 'msvc')
 CHANNELS = ('ast.trace', 'stdout', 'stderr')
 MAX_FILE_BYTES = 128 * 1024 * 1024
@@ -77,7 +77,7 @@ def build(args, profile, jobs):
     directory.mkdir(parents=True, exist_ok=True)
     source = args.source.resolve()
     selected = (args.msvc if profile == 'msvc' else
-                args.gcc if profile in ('gcc', 'gcc-unsigned-char') else args.clang)
+                args.gcc if profile in ('gcc', 'gcc-gmp', 'gcc-unsigned-char') else args.clang)
     compiler = shutil.which(selected)
     if not compiler:
         raise ValueError(f'compiler not found for {profile}')
@@ -113,6 +113,7 @@ def build(args, profile, jobs):
                f'-DCMAKE_CXX_FLAGS{flags_suffix}=' + shlex.join(flags),
                f'-DCMAKE_EXE_LINKER_FLAGS{flags_suffix}=' + shlex.join(link_flags),
                '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON',
+               '-DZ3_USE_LIB_GMP=' + ('ON' if profile == 'gcc-gmp' else 'OFF'),
                '-DZ3_INCLUDE_GIT_HASH=OFF', '-DZ3_INCLUDE_GIT_DESCRIBE=OFF',
                '-DZ3_BUILD_TEST_EXECUTABLES=OFF', '-DZ3_ENABLE_EXAMPLE_TARGETS=OFF']
     env = dict(os.environ, LC_ALL='C')
