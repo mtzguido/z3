@@ -310,7 +310,35 @@ static void tst_scientific_exponent_overflow() {
     }
 }
 
+template<bool SYNCH>
+static void tst_parse_reused_rational() {
+    mpq_manager<SYNCH> m;
+    _scoped_numeral<mpq_manager<SYNCH>> value(m), expected(m);
+    struct test_case { char const* text; int numerator; unsigned denominator; };
+    test_case cases[] = {
+        {"1e2", 100, 1}, {"1e0", 1, 1}, {"1e-2", 1, 100},
+        {"-2E+2", -200, 1}, {"0e2", 0, 1}, {"1.25e2", 125, 1},
+        {"1.25e-2", 1, 80}, {"-1.25", -5, 4}, {"7/9", 7, 9}, {"42", 42, 1}
+    };
+    for (char const* previous : {"1/3", "-7/11", "1/18446744073709551617", "0", "5"}) {
+        for (auto const& test : cases) {
+            m.set(value, previous);
+            m.set(value, test.text);
+            m.set(expected, test.numerator, test.denominator);
+            ENSURE(m.eq(value, expected));
+        }
+    }
+    // Also exercise successive assignments whose denominators vary.
+    for (auto const& test : cases) {
+        m.set(value, test.text);
+        m.set(expected, test.numerator, test.denominator);
+        ENSURE(m.eq(value, expected));
+    }
+}
+
 void tst_mpq() {
+    tst_parse_reused_rational<false>();
+    tst_parse_reused_rational<true>();
     tst_scientific_exponent_overflow<false>();
     tst_scientific_exponent_overflow<true>();
     tst_large_double_conversion<false>();

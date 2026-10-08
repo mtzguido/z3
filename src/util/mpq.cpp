@@ -182,7 +182,7 @@ void mpq_manager<SYNCH>::display_decimal(std::ostream & out, mpq const & a, unsi
 
 template<bool SYNCH>
 void mpq_manager<SYNCH>::set(mpq & a, char const * val) {
-    reset(a.m_num);
+    reset(a);
     _scoped_numeral<mpz_manager<SYNCH>> _zten(*this);
     _scoped_numeral<mpz_manager<SYNCH>> tmp(*this);
     set(_zten, 10);
