@@ -524,10 +524,11 @@ void mpz_manager<SYNCH>::div(mpz const & a, mpz const & b, mpz & c) {
         set(c, a);
     }
     else if (is_neg(a)) {
+        bool b_negative = is_neg(b);
         mpz tmp;
         machine_div_rem(a, b, c, tmp);
         if (!is_zero(tmp)) {
-            if (is_neg(b))
+            if (b_negative)
                 add(c, mk_z(1), c);
             else
                 sub(c, mk_z(1), c);
@@ -543,13 +544,19 @@ void mpz_manager<SYNCH>::div(mpz const & a, mpz const & b, mpz & c) {
 template<bool SYNCH>
 void mpz_manager<SYNCH>::mod(mpz const & a, mpz const & b, mpz & c) {
     STRACE(mpz, tout << "[mpz-ext] mod(" << to_string(a) << ",  " << to_string(b) << ") == ";); 
-    rem(a, b, c);
-    if (is_neg(c)) {
+    // Preserve the divisor until the Euclidean remainder has been corrected.
+    mpz tmp;
+    mpz & r = &b == &c ? tmp : c;
+    rem(a, b, r);
+    if (is_neg(r)) {
         if (is_pos(b))
-            add(c, b, c);
+            add(r, b, r);
         else
-            sub(c, b, c);
+            sub(r, b, r);
     }
+    if (&b == &c)
+        swap(c, tmp);
+    del(tmp);
     STRACE(mpz, tout << to_string(c) << "\n";);
 }
 

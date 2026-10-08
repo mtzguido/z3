@@ -296,6 +296,53 @@ static void tst_bigint_bitwise_not() {
     }
 }
 
+static void tst_bigint_division_aliases() {
+    unsynch_mpz_manager m;
+    scoped_mpz a(m), b(m), result(m), expected(m), large(m);
+    m.set(large, "340282366920938463463374607431768211456");
+    int64_t numerators[] = {0, 1, -1, 5, -5, INT_MIN, INT_MAX, -4294967297LL, 4294967297LL};
+    int64_t divisors[] = {1, -1, 3, -3, -4294967296LL, 4294967296LL};
+    for (int64_t numerator : numerators) {
+        for (int64_t divisor : divisors) {
+            int64_t modulus = divisor < 0 ? -divisor : divisor;
+            int64_t remainder = numerator % modulus;
+            if (remainder < 0)
+                remainder += modulus;
+            int64_t quotient = (numerator - remainder) / divisor;
+            for (bool computed : {false, true}) {
+                for (bool modulo : {false, true}) {
+                    m.set(expected, modulo ? remainder : quotient);
+                    for (unsigned alias : {0u, 1u, 2u}) {
+                        m.set(a, numerator);
+                        m.set(b, divisor);
+                        if (computed) {
+                            m.add(a, large, a);
+                            m.sub(a, large, a);
+                            m.add(b, large, b);
+                            m.sub(b, large, b);
+                        }
+                        mpz& out = alias == 0 ? result.get() : alias == 1 ? a.get() : b.get();
+                        if (modulo)
+                            m.mod(a, b, out);
+                        else
+                            m.div(a, b, out);
+                        ENSURE(m.eq(out, expected));
+                    }
+                }
+            }
+        }
+    }
+    // Both inputs and the output may refer to the same numeral as well.
+    for (int64_t value : divisors) {
+        m.set(a, value);
+        m.div(a, a, a);
+        ENSURE(m.is_one(a));
+        m.set(a, value);
+        m.mod(a, a, a);
+        ENSURE(m.is_zero(a));
+    }
+}
+
 void tst_bigint() {
     tst_bigint_size();
     tst_bigint_logical_shifts();
@@ -304,4 +351,5 @@ void tst_bigint() {
     tst_bigint_decompose();
     tst_bigint_division_by_zero();
     tst_bigint_bitwise_not();
+    tst_bigint_division_aliases();
 }
