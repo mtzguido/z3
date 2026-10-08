@@ -264,6 +264,38 @@ static void tst_bigint_division_by_zero() {
     }
 }
 
+static void tst_bigint_bitwise_not() {
+    unsynch_mpz_manager m;
+    scoped_mpz value(m), result(m), expected(m), large(m);
+    m.set(large, "340282366920938463463374607431768211456");
+    for (char const* input : {"0", "1", "2147483647", "18446744073709551616"}) {
+        for (bool computed : {false, true}) {
+            m.set(value, input);
+            if (computed) {
+                m.add(value, large, value);
+                m.sub(value, large, value);
+            }
+            m.set(result, large);
+            m.bitwise_not(0, value, result);
+            ENSURE(m.is_zero(result));
+            m.bitwise_not(0, value, value);
+            ENSURE(m.is_zero(value));
+        }
+    }
+    struct test_case { unsigned width; char const* input; char const* result; };
+    for (auto const& test : {
+             test_case{1, "0", "1"}, {1, "1", "0"},
+             {63, "0", "9223372036854775807"}, {64, "0", "18446744073709551615"},
+             {65, "0", "36893488147419103231"}, {65, "18446744073709551616", "18446744073709551615"}}) {
+        m.set(value, test.input);
+        m.set(expected, test.result);
+        m.bitwise_not(test.width, value, result);
+        ENSURE(m.eq(result, expected));
+        m.bitwise_not(test.width, value, value);
+        ENSURE(m.eq(value, expected));
+    }
+}
+
 void tst_bigint() {
     tst_bigint_size();
     tst_bigint_logical_shifts();
@@ -271,4 +303,5 @@ void tst_bigint() {
     tst_bigint_power();
     tst_bigint_decompose();
     tst_bigint_division_by_zero();
+    tst_bigint_bitwise_not();
 }

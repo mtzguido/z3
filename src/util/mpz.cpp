@@ -1446,6 +1446,10 @@ void mpz_manager<SYNCH>::bitwise_xor(mpz const & a, mpz const & b, mpz & c) {
 template<bool SYNCH>
 void mpz_manager<SYNCH>::bitwise_not(unsigned sz, mpz const & a, mpz & c) {
     SASSERT(is_nonneg(a));
+    if (sz == 0) {
+        set(c, 0);
+        return;
+    }
     if (is_small(a) && sz <= 64) {
         uint64_t v = ~get_uint64(a);
         unsigned zero_out = 64 - sz;
