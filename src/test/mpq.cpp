@@ -382,7 +382,31 @@ static void tst_signed_fraction_endpoints() {
     }
 }
 
+template<bool SYNCH>
+static void tst_set_component_aliases() {
+    mpq_manager<SYNCH> m;
+    _scoped_numeral<mpq_manager<SYNCH>> value(m), expected(m);
+    mpz external_numerator(-5), external_denominator(-7);
+    for (char const* original : {"-2/3", "0", "2/3", "4294967297/73786976294838206467"}) {
+        for (unsigned ni = 0; ni < 3; ++ni) {
+            for (unsigned di = 0; di < 3; ++di) {
+                m.set(value, original);
+                mpz const* numerators[] = {&value.get().numerator(), &value.get().denominator(), &external_numerator};
+                mpz const* denominators[] = {&value.get().numerator(), &value.get().denominator(), &external_denominator};
+                if (m.is_zero(*denominators[di]))
+                    continue;
+                m.set(expected, *numerators[ni], *denominators[di]);
+                m.set(value, *numerators[ni], *denominators[di]);
+                ENSURE(m.eq(value, expected));
+                ENSURE(m.is_pos(value.get().denominator()));
+            }
+        }
+    }
+}
+
 void tst_mpq() {
+    tst_set_component_aliases<false>();
+    tst_set_component_aliases<true>();
     tst_signed_fraction_endpoints<false>();
     tst_signed_fraction_endpoints<true>();
     tst_perfect_square_alias<false>();

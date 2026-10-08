@@ -698,15 +698,20 @@ public:
     }
     
     void set(mpq & a, mpz const & n, mpz const & d) {
-        if (is_neg(d)) {
+        if (&d == &a.m_num) {
+            // Writing the numerator would destroy the source denominator.
+            _scoped_numeral<mpz_manager<SYNCH>> denominator(*this);
+            set(denominator, d);
             set(a.m_num, n);
-            set(a.m_den, d);
-            neg(a.m_num);
-            neg(a.m_den);
+            set(a.m_den, denominator);
         }
         else {
             set(a.m_num, n);
             set(a.m_den, d);
+        }
+        if (is_neg(a.m_den)) {
+            neg(a.m_num);
+            neg(a.m_den);
         }
         normalize(a);
     }
