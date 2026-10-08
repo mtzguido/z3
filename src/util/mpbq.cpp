@@ -222,9 +222,11 @@ void mpbq_manager::mul(mpbq const & a, mpbq const & b, mpbq & r) {
     rational _a = to_rational(a);
     rational _b = to_rational(b);
 #endif
+    // The output may overwrite the exponent of an integer input.
+    bool needs_normalization = a.m_k == 0 || b.m_k == 0;
     m_manager.mul(a.m_num, b.m_num, r.m_num);
     r.m_k = a.m_k + b.m_k;
-    if (a.m_k == 0 || b.m_k == 0) {
+    if (needs_normalization) {
         // if a.m_k and b.m_k are greater than 0, then there is no point in normalizing r.
         normalize(r);
     }

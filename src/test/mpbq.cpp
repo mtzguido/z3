@@ -55,7 +55,47 @@ static void tst2() {
    std::cout << a << "\n";
  }
 
+static void tst_mul_alias_normalization() {
+    unsynch_mpz_manager zm;
+    mpbq_manager m(zm);
+    scoped_mpbq a(m), b(m), separate(m), expected(m);
+    scoped_mpz f(zm), c(zm), large(zm);
+    for (int an : {-8, -2, 0, 2, 3, 8}) {
+        for (int bn : {-3, -1, 0, 1, 2, 4}) {
+            for (unsigned ak : {0u, 1u, 3u}) {
+                for (unsigned bk : {0u, 1u, 3u}) {
+                    int numerator = an * bn, denominator = 1 << (ak + bk);
+                    int quotient = numerator / denominator;
+                    bool integral = numerator % denominator == 0;
+                    int expected_floor = quotient - (!integral && numerator < 0);
+                    int expected_ceil = quotient + (!integral && numerator > 0);
+                    m.set(expected, numerator, ak + bk);
+                    for (unsigned alias = 0; alias < 3; ++alias) {
+                        m.set(a, an, ak);
+                        m.set(b, bn, bk);
+                        mpbq& output = alias == 0 ? separate.get() : alias == 1 ? a.get() : b.get();
+                        m.mul(a, b, output);
+                        ENSURE(m.eq(output, expected));
+                        ENSURE(m.is_int(output) == integral);
+                        m.floor(zm, output, f);
+                        m.ceil(zm, output, c);
+                        ENSURE(zm.eq(f, mpz(expected_floor)));
+                        ENSURE(zm.eq(c, mpz(expected_ceil)));
+                    }
+                }
+            }
+        }
+    }
+    zm.power(mpz(2), 96, large);
+    m.set(a, large);
+    m.set(b, 3, 97);
+    m.set(expected, 3, 1);
+    m.mul(a, b, a);
+    ENSURE(m.eq(a, expected));
+}
+
 void tst_mpbq() {
+    tst_mul_alias_normalization();
     tst1();
     tst2();
 }
