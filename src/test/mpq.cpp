@@ -20,6 +20,7 @@ Revision History:
 #include "util/mpq.h"
 #include "util/rational.h"
 #include "util/timeit.h"
+#include "util/z3_exception.h"
 #include <iostream>
 #include <cmath>
 #include <limits>
@@ -285,7 +286,33 @@ static void tst_large_double_conversion() {
     check(0.0);
 }
 
+template<bool SYNCH>
+static void tst_scientific_exponent_overflow() {
+    mpq_manager<SYNCH> m;
+    for (char const* text : {
+            "1e4294967296", "1e-4294967296", "1e18446744073709551616",
+            "1e18446744073709551617", "-1E+18446744073709551616",
+            "1.5e-18446744073709551617", "1e999999999999999999999999999999999999"}) {
+        _scoped_numeral<mpq_manager<SYNCH>> value(m);
+        bool rejected = false;
+        try {
+            m.set(value, text);
+        }
+        catch (default_exception const&) {
+            rejected = true;
+        }
+        ENSURE(rejected);
+    }
+    for (char const* text : {"1e000000000000000000000000000000000002", "10E+1", "1000e-1"}) {
+        _scoped_numeral<mpq_manager<SYNCH>> value(m);
+        m.set(value, text);
+        ENSURE(m.eq(value, 100));
+    }
+}
+
 void tst_mpq() {
+    tst_scientific_exponent_overflow<false>();
+    tst_scientific_exponent_overflow<true>();
     tst_large_double_conversion<false>();
     tst_large_double_conversion<true>();
     tst_add_sub_aliases<false>();

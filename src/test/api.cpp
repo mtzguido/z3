@@ -416,7 +416,25 @@ static void test_large_rational_double() {
     Z3_del_context(ctx);
 }
 
+static void test_scientific_exponent_overflow() {
+    Z3_config cfg = Z3_mk_config();
+    Z3_context ctx = Z3_mk_context(cfg);
+    Z3_del_config(cfg);
+    Z3_set_error_handler(ctx, [](Z3_context, Z3_error_code) {});
+    Z3_sort reals = Z3_mk_real_sort(ctx);
+    for (char const* text : {"1e18446744073709551616", "1e18446744073709551617",
+                             "1e-18446744073709551616", "1.5E+18446744073709551617"}) {
+        ENSURE(!Z3_mk_numeral(ctx, text, reals));
+        ENSURE(Z3_get_error_code(ctx) != Z3_OK);
+    }
+    Z3_ast valid = Z3_mk_numeral(ctx, "1e000000000000000000000000000000000002", reals);
+    ENSURE(valid && Z3_get_error_code(ctx) == Z3_OK);
+    ENSURE(Z3_get_numeral_double(ctx, valid) == 100.0);
+    Z3_del_context(ctx);
+}
+
 void tst_api() {
+    test_scientific_exponent_overflow();
     test_large_rational_double();
     test_solver_model_completion();
     test_apps();

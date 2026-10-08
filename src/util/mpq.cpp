@@ -219,7 +219,7 @@ void mpq_manager<SYNCH>::set(mpq & a, char const * val) {
                 ++str;
             }
         }
-        unsigned long long exp = 0;
+        unsigned exp = 0;
         bool exp_sign = false;
         if (str[0] == 'e' || str[0] == 'E') {
             if (is_rat)
@@ -236,7 +236,10 @@ void mpq_manager<SYNCH>::set(mpq & a, char const * val) {
             while (str[0]) {
                 if ('0' <= str[0] && str[0] <= '9') {
                     SASSERT(str[0] - '0' <= 9);
-                    exp = (10*exp) + (str[0] - '0');
+                    unsigned digit = str[0] - '0';
+                    if (exp > (UINT_MAX - digit) / 10)
+                        throw default_exception("exponent is too big");
+                    exp = 10 * exp + digit;
                 }
                 else if ('/' == str[0]) {
                     throw default_exception("mixing rational/scientific notation");
@@ -247,8 +250,6 @@ void mpq_manager<SYNCH>::set(mpq & a, char const * val) {
         }
         if (!is_rat) {
             // a <- a.m_num + a.m_den/tmp2
-            if (exp > static_cast<unsigned long long>(UINT_MAX))
-                throw default_exception("exponent is too big");
             _scoped_numeral<mpq_manager<SYNCH>> b(*this);
             if (has_den) {
                 set(b, a.m_den, tmp2);
@@ -259,7 +260,7 @@ void mpq_manager<SYNCH>::set(mpq & a, char const * val) {
                 _scoped_numeral<mpq_manager<SYNCH>> _exp(*this);
                 _scoped_numeral<mpq_manager<SYNCH>> _qten(*this);
                 _qten = 10;
-                power(_qten, static_cast<unsigned>(exp), _exp);
+                power(_qten, exp, _exp);
                 TRACE(mpq_set, tout << "a: " << to_string(a) << ", exp_sign:" << exp_sign << ", exp: " << exp << " " << to_string(_exp) << std::endl;);
                 if (exp_sign)
                     div(a, _exp, a);
