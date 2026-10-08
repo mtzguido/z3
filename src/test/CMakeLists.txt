@@ -22,6 +22,7 @@ add_executable(test-z3
   arith_simplifier_plugin.cpp
   ast.cpp
   bdd.cpp
+  bigint.cpp
   bit_blaster.cpp
   bits.cpp
   bit_vector.cpp

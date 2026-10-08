@@ -52,6 +52,7 @@
     X(heap) \
     X(hashtable) \
     X(rational) \
+    X(bigint) \
     X(inf_rational) \
     X(ast) \
     X(optional) \

@@ -1120,12 +1120,19 @@ void mpz_manager<SYNCH>::gcd(mpz const & a, mpz const & b, mpz & c) {
 
 template<bool SYNCH>
 unsigned mpz_manager<SYNCH>::size_info(mpz const & a) {
+    // Resource accounting uses numeric size: one unit for a signed int,
+    // otherwise one plus the number of 32-bit magnitude words.
     if (is_small(a))
         return 1;
 #ifndef _MP_GMP
+    if (size(a) == 1 && digits(a)[0] <= static_cast<digit_t>(INT_MAX) + (a.m_val < 0 ? 1u : 0u))
+        return 1;
     return a.m_ptr->m_size + 1;
 #else
-    return mpz_size(*a.m_ptr);
+    if (mpz_fits_sint_p(*a.m_ptr))
+        return 1;
+    // Match the internal backend's 32-bit magnitude words, not GMP's limbs.
+    return 1 + (mpz_sizeinbase(*a.m_ptr, 2) + 31) / 32;
 #endif
 }
 
