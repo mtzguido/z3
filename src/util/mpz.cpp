@@ -17,6 +17,7 @@ Revision History:
 
 --*/
 #include <cstring>
+#include <cmath>
 #include <sstream>
 #include <iomanip>
 #include <numeric>
@@ -1655,19 +1656,30 @@ double mpz_manager<SYNCH>::get_double(mpz const & a) const {
     if (is_small(a))
         return static_cast<double>(a.m_val);
 #ifndef _MP_GMP
-    double r = 0.0;
-    double d = 1.0;
+    constexpr unsigned word_bits = 32, precision = 53;
+    static_assert(std::numeric_limits<digit_t>::digits == word_bits);
+    static_assert(std::numeric_limits<double>::is_iec559 &&
+                  std::numeric_limits<double>::digits == precision &&
+                  std::numeric_limits<double>::max_exponent == 1024);
     unsigned sz = size(a);
-    for (unsigned i = 0; i < sz; ++i) {
-        r += d * static_cast<double>(digits(a)[i]);
-        if (sizeof(digit_t) == sizeof(uint64_t))
-            d *= (1.0 + static_cast<double>(UINT64_MAX)); // 64-bit version, multiply by 2^64
-        else
-            d *= (1.0 + static_cast<double>(UINT_MAX));   // 32-bit version, multiply by 2^32
+    if (sz > std::numeric_limits<double>::max_exponent / word_bits) {
+        double inf = std::numeric_limits<double>::infinity();
+        return a.m_val < 0 ? -inf : inf;
     }
-    if (!(r >= 0.0)) {
-        r = static_cast<double>(UINT64_MAX); // some large number
-    }
+    digit_t const* ds = digits(a);
+    SASSERT(sz > 0 && ds[sz - 1] != 0);
+    unsigned bits = (sz - 1) * word_bits + std::bit_width(ds[sz - 1]);
+    unsigned shift = bits > precision ? bits - precision : 0;
+    unsigned index = shift / word_bits, offset = shift % word_bits;
+    // Keep the leading 53 bits of the magnitude, rounding toward zero like GMP.
+    // The retained bits span at most three words; discarded bits cannot round up.
+    uint64_t significand = static_cast<uint64_t>(ds[index]) >> offset;
+    if (index + 1 < sz)
+        significand |= static_cast<uint64_t>(ds[index + 1]) << (word_bits - offset);
+    if (offset > 2 * word_bits - precision)
+        significand |= static_cast<uint64_t>(ds[index + 2]) << (2 * word_bits - offset);
+    // Both the conversion and scaling are exact, independent of the FP rounding mode.
+    double r = std::ldexp(static_cast<double>(significand), shift);
     return a.m_val < 0 ? -r : r;
 #else
     return mpz_get_d(*a.m_ptr);
