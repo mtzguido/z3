@@ -362,10 +362,11 @@ void mpq_manager<SYNCH>::lin_arith_op(mpq const& a, mpq const& b, mpq& c, mpz& g
     }                                           
     else {                                      
         div(a.m_den, g, tmp3);                  
-        mul(tmp3, b.m_den, c.m_den);            
         mul(tmp3, b.m_num, tmp2);               
-        div(b.m_den, g, tmp3);                  
-        mul(tmp3, a.m_num, tmp1);               
+        // Read both denominators before writing an aliased output.
+        div(b.m_den, g, tmp1);
+        mul(tmp3, b.m_den, c.m_den);
+        mul(tmp1, a.m_num, tmp1);
         if (SUB) sub(tmp1, tmp2, tmp3); else add(tmp1, tmp2, tmp3);
         gcd(tmp3, g, tmp1);                     
         if (is_one(tmp1)) {                     

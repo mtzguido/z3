@@ -160,7 +160,54 @@ static void tst_prev_power_2() {
     tst_prev_power_2((1ll << 60), 3, 58);
 }
 
+template<bool SYNCH>
+static void tst_add_sub_aliases() {
+    mpq_manager<SYNCH> m;
+    _scoped_numeral<mpq_manager<SYNCH>> a(m), b(m), result(m), expected(m), large(m);
+    m.set(large, "340282366920938463463374607431768211456");
+    int64_t numerators[] = {-5, 0, 1, 4294967297LL};
+    for (int64_t an : numerators) {
+        for (int64_t bn : {-1, 1, 5}) {
+            for (uint64_t ad : {4u, 6u, 9u}) {
+                for (uint64_t bd : {4u, 6u, 9u}) {
+                    for (bool subtract : {false, true}) {
+                        int64_t n = an * static_cast<int64_t>(bd);
+                        n += (subtract ? -bn : bn) * static_cast<int64_t>(ad);
+                        m.set(expected, n, ad * bd);
+                        for (bool computed : {false, true}) {
+                            for (unsigned alias : {0u, 1u, 2u}) {
+                                m.set(a, an, ad);
+                                m.set(b, bn, bd);
+                                if (computed) {
+                                    m.add(a, large, a);
+                                    m.sub(a, large, a);
+                                    m.add(b, large, b);
+                                    m.sub(b, large, b);
+                                }
+                                mpq& out = alias == 0 ? result.get() : alias == 1 ? a.get() : b.get();
+                                if (subtract)
+                                    m.sub(a, b, out);
+                                else
+                                    m.add(a, b, out);
+                                ENSURE(m.eq(out, expected));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    m.set(a, 1, 4);
+    m.add(a, a, a);
+    m.set(expected, 1, 2);
+    ENSURE(m.eq(a, expected));
+    m.sub(a, a, a);
+    ENSURE(m.is_zero(a) && m.is_int(a));
+}
+
 void tst_mpq() {
+    tst_add_sub_aliases<false>();
+    tst_add_sub_aliases<true>();
     tst_prev_power_2();
     set_str_bug();
     bug2();
