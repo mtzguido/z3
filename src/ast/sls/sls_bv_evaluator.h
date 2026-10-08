@@ -452,9 +452,9 @@ public:
                 SASSERT(n_args == 2);
                 m_mpz_manager.set(result, m_tracker.get_value(args[0]));
                 auto const& shift = m_tracker.get_value(args[1]);
-                if (m_mpz_manager.is_small(shift)) {
-                    int s = m_mpz_manager.get_int(shift);
-                    SASSERT(s >= 0);
+                unsigned sz = m_bv_util.get_bv_size(n);
+                if (m_mpz_manager.is_uint64(shift) && m_mpz_manager.get_uint64(shift) < sz) {
+                    unsigned s = static_cast<unsigned>(m_mpz_manager.get_uint64(shift));
                     m_mpz_manager.machine_div2k(result, s);
                 }
                 else 
@@ -465,17 +465,12 @@ public:
                 SASSERT(n_args == 2);
                 m_mpz_manager.set(result, m_tracker.get_value(args[0]));  
                 auto const& shift = m_tracker.get_value(args[1]);
-                if (m_mpz_manager.is_small(shift)) {
-                    int s = m_mpz_manager.get_int(shift);
-                    SASSERT(s >= 0);
-                    int sz = m_bv_util.get_bv_size(n);
-                    if (s >= sz) 
-                        m_mpz_manager.set(result, m_zero);                    
-                    else {
-                        m_mpz_manager.mul2k(result, s);
-                        const mpz& p = m_powers(sz);
-                        m_mpz_manager.rem(result, p, result);
-                    }
+                unsigned sz = m_bv_util.get_bv_size(n);
+                if (m_mpz_manager.is_uint64(shift) && m_mpz_manager.get_uint64(shift) < sz) {
+                    unsigned s = static_cast<unsigned>(m_mpz_manager.get_uint64(shift));
+                    m_mpz_manager.mul2k(result, s);
+                    const mpz& p = m_powers(sz);
+                    m_mpz_manager.rem(result, p, result);
                 }
                 else 
                     m_mpz_manager.set(result, m_zero);                               
