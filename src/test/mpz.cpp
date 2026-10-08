@@ -551,7 +551,80 @@ static void tst_perfect_square_alias() {
     }
 }
 
+template<bool SYNCH>
+static void tst_extended_gcd_aliases() {
+    mpz_manager<SYNCH> m;
+    _scoped_numeral<mpz_manager<SYNCH>> original_a(m), original_b(m), expected_gcd(m), large(m);
+    _scoped_numeral<mpz_manager<SYNCH>> a(m), b(m), x(m), y(m), g(m), term1(m), term2(m);
+    mpz* outputs[] = {&a.get(), &b.get(), &x.get(), &y.get(), &g.get()};
+    auto check = [&]() {
+        m.gcd(original_a, original_b, expected_gcd);
+        for (bool same_input : {false, true}) {
+            if (same_input && !m.eq(original_a, original_b))
+                continue;
+            for (unsigned ix = 0; ix < 5; ++ix) {
+                for (unsigned iy = 0; iy < 5; ++iy) {
+                    for (unsigned ig = 0; ig < 5; ++ig) {
+                        if (ix == iy || ix == ig || iy == ig)
+                            continue; // Outputs must be distinct, but may reuse either input.
+                        m.set(a, original_a);
+                        m.set(b, original_b);
+                        m.set(x, 123);
+                        m.set(y, -456);
+                        m.set(g, 789);
+                        m.gcd(a, same_input ? a.get() : b.get(), *outputs[ix], *outputs[iy], *outputs[ig]);
+                        ENSURE(m.eq(*outputs[ig], expected_gcd));
+                        ENSURE(m.is_nonneg(*outputs[ig]));
+                        m.mul(original_a, *outputs[ix], term1);
+                        m.mul(original_b, *outputs[iy], term2);
+                        m.add(term1, term2, term1);
+                        ENSURE(m.eq(term1, expected_gcd));
+                    }
+                }
+            }
+        }
+    };
+    m.power(mpz(2), 128, large);
+    for (bool computed : {false, true}) {
+        for (unsigned shift : {0u, 96u}) {
+            for (int av : {-15, -6, 0, 6, 15}) {
+                for (int bv : {-15, -6, 0, 6, 15}) {
+                    m.set(original_a, av);
+                    m.set(original_b, bv);
+                    if (computed) {
+                        m.add(original_a, large, original_a);
+                        m.sub(original_a, large, original_a);
+                        m.add(original_b, large, original_b);
+                        m.sub(original_b, large, original_b);
+                    }
+                    m.mul2k(original_a, shift);
+                    m.mul2k(original_b, shift);
+                    check();
+                }
+            }
+        }
+    }
+    // Relatively prime multiword inputs need more than one Euclidean step.
+    m.power(mpz(2), 129, original_a);
+    m.add(original_a, mpz(3), original_a);
+    m.power(mpz(2), 130, original_b);
+    m.add(original_b, mpz(3), original_b);
+    for (bool negative_a : {false, true}) {
+        for (bool negative_b : {false, true}) {
+            if (negative_a)
+                m.neg(original_a);
+            if (negative_b)
+                m.neg(original_b);
+            check();
+            m.abs(original_a);
+            m.abs(original_b);
+        }
+    }
+}
+
 void tst_mpz() {
+    tst_extended_gcd_aliases<false>();
+    tst_extended_gcd_aliases<true>();
     tst_perfect_square_alias<false>();
     tst_perfect_square_alias<true>();
     disable_trace("mpz");

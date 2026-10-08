@@ -1225,6 +1225,13 @@ void mpz_manager<SYNCH>::gcd(unsigned sz, mpz const * as, mpz & g) {
 
 template<bool SYNCH>
 void mpz_manager<SYNCH>::gcd(mpz const & r1, mpz const & r2, mpz & a, mpz & b, mpz & r) {
+    bool r1_negative = is_neg(r1);
+    bool r2_negative = is_neg(r2);
+#ifdef Z3DEBUG
+    _scoped_numeral<mpz_manager<SYNCH>> original_r1(*this), original_r2(*this);
+    set(original_r1, r1);
+    set(original_r2, r2);
+#endif
     mpz tmp1, tmp2;
     mpz aux, quot;
     set(tmp1, r1);
@@ -1272,15 +1279,15 @@ void mpz_manager<SYNCH>::gcd(mpz const & r1, mpz const & r2, mpz & a, mpz & b, m
         set(b, aux);
     }
 
-    if (is_neg(r1))
+    if (r1_negative)
         neg(a);
-    if (is_neg(r2))
+    if (r2_negative)
         neg(b);
 
-    // SASSERT((a*r1) + (b*r2) == tmp1);
+    // The original inputs may now contain coefficient outputs.
 #ifdef Z3DEBUG
-    mul(a, r1, nexta);
-    mul(b, r2, nextb);
+    mul(a, original_r1, nexta);
+    mul(b, original_r2, nextb);
     add(nexta, nextb, nexta);
     SASSERT(eq(nexta, tmp1));
 #endif
