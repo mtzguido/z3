@@ -504,7 +504,56 @@ static void tst_pw2() {
     }
 }
 
+template<bool SYNCH>
+static void tst_perfect_square_alias() {
+    mpz_manager<SYNCH> m;
+    _scoped_numeral<mpz_manager<SYNCH>> input(m), separate(m), aliased(m), square(m), large(m);
+    m.power(mpz(2), 128, large);
+    auto check = [&](bool expected) {
+        m.set(separate, -123);
+        m.set(aliased, input);
+        ENSURE(m.is_perfect_square(input, separate) == expected);
+        ENSURE(m.is_perfect_square(aliased, aliased) == expected);
+        if (m.is_neg(input)) {
+            ENSURE(m.eq(aliased, input));
+            ENSURE(m.eq(separate, mpz(-123)));
+        }
+        else {
+            ENSURE(m.eq(aliased, separate));
+            if (expected) {
+                ENSURE(m.is_nonneg(aliased));
+                m.mul(aliased, aliased, square);
+                ENSURE(m.eq(square, input));
+            }
+        }
+    };
+    for (bool computed : {false, true}) {
+        for (int n = -4; n <= 256; ++n) {
+            m.set(input, n);
+            if (computed) {
+                m.add(input, large, input);
+                m.sub(input, large, input);
+            }
+            int root = 0;
+            while (root * root < n)
+                ++root;
+            check(n >= 0 && root * root == n);
+        }
+    }
+    for (unsigned bits : {33u, 64u, 129u}) {
+        m.power(mpz(2), bits, large);
+        m.add(large, mpz(3), large);
+        m.mul(large, large, large);
+        for (int offset : {-1, 0, 1}) {
+            m.add(large, mpz(offset), input);
+            check(offset == 0);
+        }
+    }
+}
+
 void tst_mpz() {
+    tst_perfect_square_alias<false>();
+    tst_perfect_square_alias<true>();
     disable_trace("mpz");
     enable_trace("mpz_2k");
     tst_pw2();

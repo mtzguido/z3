@@ -336,7 +336,37 @@ static void tst_parse_reused_rational() {
     }
 }
 
+template<bool SYNCH>
+static void tst_perfect_square_alias() {
+    mpq_manager<SYNCH> m;
+    _scoped_numeral<mpq_manager<SYNCH>> value(m), expected(m);
+    struct test_case { char const* text; char const* root; };
+    for (auto const& test : {test_case{"0", "0"}, {"1", "1"}, {"16", "4"},
+                             {"4/9", "2/3"}, {"2/9", nullptr}, {"4/3", nullptr}, {"-4/9", nullptr}}) {
+        m.set(value, test.text);
+        ENSURE(m.is_perfect_square(value, value) == (test.root != nullptr));
+        if (test.root) {
+            m.set(expected, test.root);
+            ENSURE(m.eq(value, expected));
+        }
+    }
+    _scoped_numeral<mpz_manager<SYNCH>> numerator(m), denominator(m);
+    m.power(mpz(2), 64, numerator);
+    m.add(numerator, mpz(3), numerator);
+    m.power(mpz(2), 65, denominator);
+    m.inc(denominator);
+    m.set(expected, numerator, denominator);
+    m.mul(expected, expected, value);
+    ENSURE(m.is_perfect_square(value, value));
+    ENSURE(m.eq(value, expected));
+    m.set(value, 16);
+    ENSURE(m.is_int_perfect_square(value, value));
+    ENSURE(m.eq(value, 4));
+}
+
 void tst_mpq() {
+    tst_perfect_square_alias<false>();
+    tst_perfect_square_alias<true>();
     tst_parse_reused_rational<false>();
     tst_parse_reused_rational<true>();
     tst_scientific_exponent_overflow<false>();
