@@ -1828,14 +1828,22 @@ unsigned mpz_manager<SYNCH>::hash(mpz const & a) {
         unsigned u = static_cast<unsigned>(a.m_val);
         return a.m_val < 0 ? 0u - u : u;
     }
-#ifndef _MP_GMP
-    unsigned sz = size(a);
-    if (sz == 1)
-        return static_cast<unsigned>(digits(a)[0]);
-    return string_hash(std::string_view(reinterpret_cast<char*>(digits(a)), sz * sizeof(digit_t)), 17);
+#ifdef _MP_GMP
+    // Match the internal backend's magnitude words, regardless of GMP limb size.
+    constexpr unsigned word_bits = std::numeric_limits<digit_t>::digits;
+    sbuffer<digit_t> buffer((mpz_sizeinbase(*a.m_ptr, 2) + word_bits - 1) / word_bits, 0);
+    size_t sz;
+    mpz_export(buffer.data(), &sz, -1, sizeof(digit_t), 0, 0, *a.m_ptr);
+    digit_t const* ds = buffer.data();
 #else
-    return mpz_get_si(*a.m_ptr);
+    unsigned sz = size(a);
+    digit_t const* ds = digits(a);
 #endif
+    if (sz == 0)
+        return 0;
+    if (sz == 1)
+        return ds[0];
+    return string_hash(std::string_view(reinterpret_cast<char const*>(ds), sz * sizeof(digit_t)), 17);
 }
 
 template<bool SYNCH>
