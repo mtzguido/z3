@@ -192,9 +192,47 @@ static void tst_bigint_power() {
     }
 }
 
+static void tst_bigint_decompose() {
+    unsynch_mpz_manager m;
+    scoped_mpz value(m), restored(m), large(m);
+    m.set(large, "340282366920938463463374607431768211456");
+    svector<digit_t> words;
+    for (int n : {INT_MIN, -1, 0, 1, INT_MAX}) {
+        m.set(value, n);
+        bool negative = m.decompose(value, words);
+        ENSURE(negative == (n < 0));
+        ENSURE(words.size() == 1);
+        if (n == INT_MIN)
+            ENSURE(words[0] == static_cast<unsigned>(INT_MAX) + 1);
+        m.set_digits(restored, words.size(), words.data());
+        if (negative)
+            m.neg(restored);
+        ENSURE(m.eq(restored, value));
+    }
+    for (char const* n : {"-2147483648", "2147483648", "-4294967296", "4294967296",
+                          "-18446744073709551616", "18446744073709551617"}) {
+        for (bool computed : {false, true}) {
+            m.set(value, n);
+            if (computed) {
+                m.add(value, large, value);
+                m.sub(value, large, value);
+            }
+            // decompose must replace, rather than append to, an existing vector.
+            words.push_back(42);
+            bool negative = m.decompose(value, words);
+            ENSURE(negative == m.is_neg(value));
+            m.set_digits(restored, words.size(), words.data());
+            if (negative)
+                m.neg(restored);
+            ENSURE(m.eq(restored, value));
+        }
+    }
+}
+
 void tst_bigint() {
     tst_bigint_size();
     tst_bigint_logical_shifts();
     tst_bigint_arithmetic_shifts();
     tst_bigint_power();
+    tst_bigint_decompose();
 }

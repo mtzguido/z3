@@ -2493,7 +2493,7 @@ bool mpz_manager<SYNCH>::decompose(mpz const & a, svector<digit_t> & digits) {
     digits.reset();
     if (is_small(a)) {
         if (a.m_val < 0) {
-            digits.push_back(-a.m_val);
+            digits.push_back(0u - static_cast<unsigned>(a.m_val));
             return true;
         }
         else {
