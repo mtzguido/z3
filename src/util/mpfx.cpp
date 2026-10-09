@@ -26,6 +26,8 @@ Revision History:
 #include "util/bit_util.h"
 #include "util/trace.h"
 
+static_assert(sizeof(unsigned) == 4);
+
 mpfx_manager::mpfx_manager(unsigned int_sz, unsigned frac_sz, unsigned initial_capacity) {
     SASSERT(initial_capacity > 0);
     SASSERT(int_sz > 0);
@@ -108,7 +110,7 @@ bool mpfx_manager::is_int64(mpfx const & a) const {
         return true;
     unsigned * w = words(a);
     w += m_frac_part_sz;
-    if (w[1] < 0x80000000u || (w[1] == 0x80000000u && is_neg(a))) {
+    if (w[1] < 0x80000000u || (w[1] == 0x80000000u && w[0] == 0 && is_neg(a))) {
         for (unsigned i = 2; i < m_int_part_sz; ++i)
             if (w[i] != 0)
                 return false;
@@ -137,7 +139,8 @@ void mpfx_manager::set(mpfx & n, int v) {
     }
     else {
         if (v < 0) {
-            set(n, static_cast<unsigned>(-v));
+            // INT_MIN cannot be negated in signed arithmetic.
+            set(n, 0u - static_cast<unsigned>(v));
             n.m_sign = 1;
         }
         else {
@@ -176,7 +179,8 @@ void mpfx_manager::set(mpfx & n, int64_t v) {
     }
     else {
         if (v < 0) {
-            set(n, static_cast<uint64_t>(-v));
+            // INT64_MIN cannot be negated in signed arithmetic.
+            set(n, uint64_t(0) - static_cast<uint64_t>(v));
             n.m_sign = 1;
         }
         else {
@@ -201,18 +205,12 @@ void mpfx_manager::set(mpfx & n, uint64_t v) {
         allocate_if_needed(n);
         n.m_sign              = 0;
         unsigned * w          = words(n);
-        uint64_t * _vp        = &v;
-        unsigned * _v         = nullptr;
-        memcpy(&_v, &_vp, sizeof(unsigned*));
         for (unsigned i = 0; i < m_total_sz; ++i) 
             w[i] = 0;
-        w[m_frac_part_sz]     = _v[0];
-        if (m_int_part_sz == 1) {
-            SASSERT(_v[1] == 0);
-        }
-        else {
-            w[m_frac_part_sz+1] = _v[1];
-        }
+        // Digits are least-significant first, independently of host byte order.
+        w[m_frac_part_sz] = static_cast<unsigned>(v);
+        if (m_int_part_sz > 1)
+            w[m_frac_part_sz + 1] = static_cast<unsigned>(v >> 32);
     }
     SASSERT(is_int(n));
     SASSERT(get_uint64(n) == v);
@@ -686,14 +684,16 @@ int64_t mpfx_manager::get_int64(mpfx const & n) const {
     SASSERT(is_int64(n));
     unsigned * w = words(n);
     w += m_frac_part_sz;
-    uint64_t r = 0;
-    memcpy(&r, w, sizeof(uint64_t));
+    // A one-word integer part has no high word; the next word belongs to another numeral.
+    uint64_t r = w[0];
+    if (m_int_part_sz > 1)
+        r |= static_cast<uint64_t>(w[1]) << 32;
     if (r == 0x8000000000000000ull) {
         SASSERT(is_neg(n));
         return INT64_MIN;
     }
     else {
-        return is_neg(n) ? -static_cast<int64_t>(r) : r;
+        return is_neg(n) ? -static_cast<int64_t>(r) : static_cast<int64_t>(r);
     }
 }
 
@@ -701,8 +701,10 @@ uint64_t mpfx_manager::get_uint64(mpfx const & n) const {
     SASSERT(is_uint64(n));
     unsigned * w = words(n);
     w += m_frac_part_sz;
-    uint64_t r = 0;
-    memcpy(&r, w, sizeof(uint64_t));
+    // Assemble only this numeral's words, without relying on host byte order.
+    uint64_t r = w[0];
+    if (m_int_part_sz > 1)
+        r |= static_cast<uint64_t>(w[1]) << 32;
     return r;
 }
 

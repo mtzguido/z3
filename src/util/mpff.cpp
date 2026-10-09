@@ -18,6 +18,7 @@ Author:
 Revision History:
 
 --*/
+#include <bit>
 #include<sstream>
 #include<iomanip>
 #include "util/mpff.h"
@@ -161,8 +162,9 @@ uint64_t mpff_manager::get_uint64(mpff const & a) const {
     int64_t exp = -static_cast<int64_t>(a.m_exponent) - sizeof(unsigned) * 8 * (m_precision - 2);
     SASSERT(exp >= 0);
     SASSERT(exp < 64);
-    uint64_t * s = reinterpret_cast<uint64_t*>(sig(a) + (m_precision - 2));
-    return exp < 64 ? *s >> static_cast<unsigned>(exp) : 0;
+    unsigned const* s = sig(a) + (m_precision - 2);
+    uint64_t significand = s[0] | (static_cast<uint64_t>(s[1]) << 32);
+    return exp < 64 ? significand >> static_cast<unsigned>(exp) : 0;
 }
 
 int64_t mpff_manager::get_int64(mpff const & a) const {
@@ -171,13 +173,14 @@ int64_t mpff_manager::get_int64(mpff const & a) const {
     int64_t exp = -static_cast<int64_t>(a.m_exponent) - sizeof(unsigned) * 8 * (m_precision - 2);
     SASSERT(exp >= 0);
     SASSERT(exp < 64);
-    uint64_t * s = reinterpret_cast<uint64_t*>(sig(a) + (m_precision - 2));
+    unsigned const* s = sig(a) + (m_precision - 2);
+    uint64_t significand = s[0] | (static_cast<uint64_t>(s[1]) << 32);
     // INT64_MIN case
-    if (exp == 0 && *s == 0x8000000000000000ull && is_neg(a)) {
+    if (exp == 0 && significand == 0x8000000000000000ull && is_neg(a)) {
         return INT64_MIN;
     }
     else {
-        int64_t r = exp < 64 ? *s >> static_cast<unsigned>(exp) : 0;
+        int64_t r = exp < 64 ? significand >> static_cast<unsigned>(exp) : 0;
         if (is_neg(a))
             r = -r;
         return r;
@@ -223,7 +226,8 @@ void mpff_manager::set(mpff & n, int v) {
     }
     else {
         if (v < 0) {
-            set(n, static_cast<unsigned>(-v));
+            // INT_MIN cannot be negated in signed arithmetic.
+            set(n, 0u - static_cast<unsigned>(v));
             n.m_sign = 1;
         }
         else {
@@ -278,14 +282,14 @@ void mpff_manager::set(mpff & n, uint64_t v) {
     else {
         allocate_if_needed(n);
         n.m_sign              = 0;
-        unsigned * _v         = reinterpret_cast<unsigned*>(&v);
-        int num_leading_zeros = nlz(2, _v);
+        int num_leading_zeros = std::countl_zero(v);
         n.m_exponent          = static_cast<int>(8 * sizeof(uint64_t)) - num_leading_zeros - static_cast<int>(m_precision_bits);
         v <<= num_leading_zeros;
         SASSERT(m_precision >= 2);
         unsigned * s          = sig(n);
-        s[m_precision-1]      = _v[1];
-        s[m_precision-2]      = _v[0];
+        // Split the value numerically, without aliasing unsigned words over uint64_t.
+        s[m_precision-1]      = static_cast<unsigned>(v >> 32);
+        s[m_precision-2]      = static_cast<unsigned>(v);
         for (unsigned i = 0; i < m_precision - 2; ++i)
             s[i] = 0;
     }

@@ -611,6 +611,22 @@ static void tst_div(unsigned prec) {
 }
 
 void tst_mpff() {
+    for (unsigned precision : {2u, 4u}) {
+        mpff_manager m(precision);
+        scoped_mpff value(m);
+        for (int n : {INT_MIN, INT_MIN + 1, -1, 0, 1, INT_MAX}) {
+            m.set(value, n);
+            ENSURE(m.get_int64(value) == n);
+        }
+        for (uint64_t n : {uint64_t(0), uint64_t(UINT_MAX), uint64_t(UINT_MAX) + 1,
+                           uint64_t(INT64_MAX), uint64_t(INT64_MAX) + 1, UINT64_MAX}) {
+            m.set(value, n);
+            ENSURE(m.get_uint64(value) == n);
+            ENSURE(m.is_int64(value) == (n <= uint64_t(INT64_MAX)));
+            m.neg(value);
+            ENSURE(m.is_int64(value) == (n <= uint64_t(INT64_MAX) + 1));
+        }
+    }
     // disable_trace("mpff");
     // enable_trace("mpff_trace");
     // enable_trace("mpff_bug");

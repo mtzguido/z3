@@ -62,7 +62,45 @@ static void tst_prev_power_2() {
     tst_prev_power_2((1ll << 60), 3, 58);
 }
 
+static void tst_native_integers() {
+    mpfx_manager m;
+    scoped_mpfx value(m);
+    for (int n : {INT_MIN, INT_MIN + 1, -1, 0, 1, INT_MAX}) {
+        m.set(value, n);
+        ENSURE(m.get_int64(value) == n);
+    }
+    for (int64_t n : {INT64_MIN, INT64_MIN + 1, int64_t(-1), int64_t(0), int64_t(1), INT64_MAX}) {
+        m.set(value, n);
+        ENSURE(m.get_int64(value) == n);
+    }
+    for (uint64_t n : {uint64_t(0), uint64_t(UINT_MAX), uint64_t(UINT_MAX) + 1,
+                       uint64_t(INT64_MAX), uint64_t(INT64_MAX) + 1, UINT64_MAX}) {
+        m.set(value, n);
+        ENSURE(m.get_uint64(value) == n);
+        ENSURE(m.is_int64(value) == (n <= uint64_t(INT64_MAX)));
+        m.neg(value);
+        ENSURE(m.is_int64(value) == (n <= uint64_t(INT64_MAX) + 1));
+    }
+    for (unsigned frac_words : {1u, 2u}) {
+        mpfx_manager narrow(1, frac_words);
+        scoped_mpfx integer(narrow), neighbor(narrow);
+        narrow.set(integer, 1);
+        narrow.set(neighbor, 1);
+        // Fill the adjacent numeral's fractional words with nonzero bits.
+        narrow.div2k(neighbor, 32 * frac_words);
+        for (int n : {1, -1, INT_MIN, INT_MAX, 0}) {
+            narrow.set(integer, n);
+            ENSURE(narrow.get_int64(integer) == n);
+            if (n >= 0)
+                ENSURE(narrow.get_uint64(integer) == static_cast<uint64_t>(n));
+        }
+        narrow.set(integer, UINT_MAX);
+        ENSURE(narrow.get_uint64(integer) == UINT_MAX);
+    }
+}
+
 void tst_mpfx() {
+    tst_native_integers();
     tst_prev_power_2();
     tst1();
 }
