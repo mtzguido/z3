@@ -24,15 +24,15 @@ s_integer::s_integer(const char * str) {
 }
 
 s_integer power(const s_integer & r, unsigned p) {
-    unsigned mask = 1;
     s_integer result = s_integer(1);
     s_integer power = r;
-    while (mask <= p) {
-        if (mask & p) {
+    while (p != 0) {
+        if (p & 1) {
             result *= power;
         }
-        power *= power;
-        mask = mask << 1;
+        p >>= 1;
+        if (p != 0)
+            power *= power;
     }
     return result;
 }

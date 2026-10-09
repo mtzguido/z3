@@ -369,6 +369,47 @@ static void tst_power(unsigned prec = 2) {
     ENSURE(m.eq(a,b));
 }
 
+static void tst_power_boundaries() {
+    for (unsigned precision : {2u, 4u}) {
+        mpff_manager m(precision);
+        scoped_mpff a(m), result(m), expected(m), one(m), two(m);
+        m.set(one, 1);
+        m.set(two, 2);
+        for (unsigned exponent : {0u, 1u, 2u, unsigned(INT_MAX), unsigned(INT_MAX) + 1,
+                                   UINT_MAX - 1, UINT_MAX}) {
+            for (int base : {-1, 0, 1}) {
+                if (base == 0 && exponent == 0) continue;
+                m.set(expected, exponent == 0 || (base == -1 && exponent % 2 == 0) ? 1 : base);
+                m.set(a, base);
+                m.power(a, exponent, result);
+                ENSURE(m.eq(result, expected));
+                m.power(a, exponent, a);
+                ENSURE(m.eq(a, expected));
+            }
+        }
+        for (bool upward : {false, true}) {
+            m.set_rounding(upward);
+            m.set(a, 1);
+            m.next(a);
+            m.power(a, UINT_MAX, result);
+            ENSURE(m.gt(result, one) && m.lt(result, two));
+            m.power(a, UINT_MAX, a);
+            ENSURE(m.eq(a, result));
+        }
+        unsigned scale = 32 * precision - 1;
+        for (bool reciprocal : {false, true}) {
+            unsigned limit = reciprocal ? unsigned(INT_MAX) + 1 - scale : unsigned(INT_MAX) + scale;
+            if (reciprocal) m.set(a, 1, 2); else m.set(a, 2);
+            m.power(a, limit, result);
+            ENSURE(m.exponent(result) == (reciprocal ? INT_MIN : INT_MAX));
+            bool overflow = false;
+            try { m.power(a, limit + 1, result); }
+            catch (mpff_manager::overflow_exception const&) { overflow = true; }
+            ENSURE(overflow);
+        }
+    }
+}
+
 static void tst_sgn(unsigned prec) {
     mpff_manager m(prec);
     scoped_mpff a(m), b(m);
@@ -611,6 +652,7 @@ static void tst_div(unsigned prec) {
 }
 
 void tst_mpff() {
+    tst_power_boundaries();
     for (unsigned precision : {2u, 4u}) {
         mpff_manager m(precision);
         scoped_mpff value(m);

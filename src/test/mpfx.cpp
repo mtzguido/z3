@@ -99,7 +99,31 @@ static void tst_native_integers() {
     }
 }
 
+static void tst_power() {
+    mpfx_manager m;
+    scoped_mpfx a(m), result(m);
+    for (unsigned exponent : {0u, 1u, 2u, unsigned(INT_MAX), unsigned(INT_MAX) + 1,
+                               UINT_MAX - 1, UINT_MAX}) {
+        for (int base : {-1, 0, 1}) {
+            if (base == 0 && exponent == 0) continue;
+            int expected = exponent == 0 || (base == -1 && exponent % 2 == 0) ? 1 : base;
+            m.set(a, base);
+            m.power(a, exponent, result);
+            ENSURE(m.get_int64(result) == expected);
+            m.power(a, exponent, a);
+            ENSURE(m.eq(a, result));
+        }
+    }
+    // 3^16 fits, but the final unused square 3^32 does not.
+    mpfx_manager narrow(1, 1);
+    scoped_mpfx base(narrow), result32(narrow);
+    narrow.set(base, 3);
+    narrow.power(base, 16, result32);
+    ENSURE(narrow.get_uint64(result32) == 43046721);
+}
+
 void tst_mpfx() {
+    tst_power();
     tst_native_integers();
     tst_prev_power_2();
     tst1();

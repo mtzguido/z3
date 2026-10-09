@@ -98,15 +98,15 @@ public:
     void dec(numeral & x) { sub(x, m_one, x); }
 
     void power(numeral const & a, unsigned p, numeral & b) {
-        unsigned mask = 1;
         numeral power;
         set(power, a);
         set(b, 1);
-        while (mask <= p) {
-            if (mask & p)
+        while (p != 0) {
+            if (p & 1)
                 mul(b, power, b);
-            mul(power, power, power);
-            mask = mask << 1;
+            p >>= 1;
+            if (p != 0)
+                mul(power, power, power);
         }
         del(power);
         check(b);

@@ -250,15 +250,15 @@ public:
             return;
         }
         SASSERT(is_p_normalized(a));
-        unsigned mask = 1;
         mpz power;
         set(power, a);
         set(b, 1);
-        while (mask <= k) {
-            if (mask & k)
+        while (k != 0) {
+            if (k & 1)
                 mul(b, power, b);
-            mul(power, power, power);
-            mask = mask << 1;
+            k >>= 1;
+            if (k != 0)
+                mul(power, power, power);
         }
         del(power);
     }

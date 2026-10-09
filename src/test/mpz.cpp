@@ -702,7 +702,30 @@ static void tst_lcm_signs_and_aliases() {
     ENSURE(lcm(rational(-6), rational(4)) == rational(12));
 }
 
+static void tst_modular_power() {
+    unsynch_mpz_manager zm;
+    mpzzp_manager m(zm, uint64_t(17));
+    scoped_mpz a(zm), result(zm);
+    for (unsigned exponent : {0u, 1u, 2u, 31u, unsigned(INT_MAX), unsigned(INT_MAX) + 1,
+                               UINT_MAX - 1, UINT_MAX}) {
+        for (int base : {-3, -1, 1, 3}) {
+            // Nonzero residues modulo 17 have period dividing 16.
+            int expected = 1;
+            for (unsigned i = 0; i < exponent % 16; ++i)
+                expected = (expected * base) % 17;
+            if (expected > 8) expected -= 17;
+            if (expected < -8) expected += 17;
+            m.set(a, base);
+            m.power(a, exponent, result);
+            ENSURE(zm.eq(result, mpz(expected)));
+            m.power(a, exponent, a);
+            ENSURE(zm.eq(a, result));
+        }
+    }
+}
+
 void tst_mpz() {
+    tst_modular_power();
     tst_lcm_signs_and_aliases<false>();
     tst_lcm_signs_and_aliases<true>();
     tst_modular_manager_field_status();

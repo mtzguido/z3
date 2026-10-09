@@ -1033,11 +1033,14 @@ void mpff_manager::power(mpff const & a, unsigned p, mpff & b) {
                 b.m_sign = 0;
             else
                 b.m_sign = a.m_sign;
-            int64_t exp = a.m_exponent;
-            exp *= p;
-            if (exp > INT_MAX || exp < INT_MIN)
+            // Remove the significand's scale before exponentiating. Checking
+            // the unadjusted exponent would reject even 1^UINT_MAX.
+            int64_t scale = m_precision_bits - 1;
+            int64_t exp = static_cast<int64_t>(a.m_exponent) + scale;
+            // Bound the product before multiplying, including at large precision.
+            if (exp > (INT_MAX + scale) / p || exp < (INT_MIN + scale) / p)
                 throw overflow_exception();
-            exp += (m_precision_bits - 1)*(p - 1);
+            exp = exp * p - scale;
             if (exp > INT_MAX || exp < INT_MIN)
                 throw overflow_exception();
             unsigned * r = sig(b);
@@ -1047,15 +1050,15 @@ void mpff_manager::power(mpff const & a, unsigned p, mpff & b) {
             b.m_exponent = static_cast<int>(exp);
         }
         else {
-            unsigned mask = 1;
             scoped_mpff pw(*this);
             set(pw, a);
             set(b, 1);
-            while (mask <= p) {
-                if (mask & p)
+            while (p != 0) {
+                if (p & 1)
                     mul(b, pw, b);
-                mul(pw, pw, pw);
-                mask = mask << 1;
+                p >>= 1;
+                if (p != 0)
+                    mul(pw, pw, pw);
             }
         }
     }

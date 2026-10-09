@@ -636,15 +636,15 @@ void mpfx_manager::power(mpfx const & a, unsigned p, mpfx & b) {
         }
     }
     else {
-        unsigned mask = 1;
         scoped_mpfx pw(*this);
         set(pw, a);
         set(b, 1);
-        while (mask <= p) {
-            if (mask & p)
+        while (p != 0) {
+            if (p & 1)
                 mul(b, pw, b);
-            mul(pw, pw, pw);
-            mask = mask << 1;
+            p >>= 1;
+            if (p != 0)
+                mul(pw, pw, pw);
         }
     }
     STRACE(mpfx_trace, tout << "[mpfx] ("; display(tout, _a); tout << ") ^ " << _p << (m_to_plus_inf ? "<=" : ">="); display(tout, b); tout << "\n";);

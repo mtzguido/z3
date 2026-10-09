@@ -11,6 +11,7 @@ Abstract:
 #include "ast/reg_decl_plugins.h"
 #include "ast/sls/sls_bv_evaluator.h"
 #include "util/rational.h"
+#include "util/s_integer.h"
 
 static void tst_bigint_size() {
     struct test_case { char const* value; unsigned size; };
@@ -155,6 +156,13 @@ static void tst_bigint_arithmetic_shifts() {
 }
 
 static void tst_bigint_power() {
+    for (unsigned exponent : {0u, 1u, unsigned(INT_MAX), unsigned(INT_MAX) + 1, UINT_MAX}) {
+        for (int base : {-1, 1}) {
+            int expected = base == -1 && exponent % 2 != 0 ? -1 : 1;
+            ENSURE(power(s_integer(base), exponent) == s_integer(expected));
+        }
+    }
+    ENSURE(power(s_integer(3), 16) == s_integer(43046721));
     unsynch_mpz_manager m;
     scoped_mpz base(m), result(m), large(m), expected(m);
     m.set(large, "4294967296");

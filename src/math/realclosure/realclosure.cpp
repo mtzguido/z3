@@ -5819,17 +5819,17 @@ namespace realclosure {
            \brief a <- b^k
         */
         void power(numeral const & a, unsigned k, numeral & b) {
-            unsigned mask = 1;
             value_ref power(*this);
             value_ref _b(*this);
             power = a.m_value;
             _b = one();
-            while (mask <= k) {
+            while (k != 0) {
                 checkpoint();
-                if (mask & k)
+                if (k & 1)
                     mul(_b, power, _b);
-                mul(power, power, power);
-                mask = mask << 1;
+                k >>= 1;
+                if (k != 0)
+                    mul(power, power, power);
             }
             set(b, _b);
         }

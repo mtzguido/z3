@@ -164,6 +164,23 @@ static void tst_denominators() {
 }
 
 void tst_rcf() {
+    {
+        unsynch_mpq_manager qm;
+        reslimit limit;
+        rcmanager m(limit, qm);
+        scoped_rcnumeral a(m), result(m), expected(m);
+        for (unsigned exponent : {0u, 1u, unsigned(INT_MAX), unsigned(INT_MAX) + 1, UINT_MAX}) {
+            for (int base : {-1, 0, 1}) {
+                if (base == 0 && exponent == 0) continue;
+                m.set(a, base);
+                m.set(expected, exponent == 0 || (base == -1 && exponent % 2 == 0) ? 1 : base);
+                m.power(a, exponent, result);
+                ENSURE(m.eq(result, expected));
+                m.power(a, exponent, a);
+                ENSURE(m.eq(a, expected));
+            }
+        }
+    }
     // enable_trace("rcf_clean");
     // enable_trace("rcf_clean_bug");
     tst_denominators();
