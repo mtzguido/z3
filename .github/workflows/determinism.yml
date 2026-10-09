@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   variants:
-    name: Trace (${{ matrix.profile }})
+    name: Trace (${{ matrix.profile }}, ${{ matrix.arithmetic }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     defaults:
@@ -26,9 +26,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        profile: [gcc, gcc-unsigned-char, clang, libcxx, libcxx-random, apple-clang, msvc]
+        arithmetic: [internal, gmp]
         include:
           - {profile: gcc, os: ubuntu-24.04}
-          - {profile: gcc-gmp, os: ubuntu-24.04}
           - {profile: gcc-unsigned-char, os: ubuntu-24.04}
           - {profile: clang, os: ubuntu-24.04}
           - {profile: libcxx, os: ubuntu-24.04}
@@ -36,6 +37,7 @@ jobs:
           - {profile: apple-clang, os: macos-15}
           - {profile: msvc, os: windows-2022}
     env:
+      PROFILE: ${{ matrix.profile }}${{ matrix.arithmetic == 'gmp' && '-gmp' || '' }}
       CCACHE_DIR: ${{ github.workspace }}/.ccache-determinism
       CCACHE_MAXSIZE: 1G
       PYTHONUTF8: '1'
@@ -90,6 +92,10 @@ jobs:
           xcodebuild -version
           /usr/bin/clang++ --version
 
+      - name: Install macOS GMP
+        if: runner.os == 'macOS' && matrix.arithmetic == 'gmp'
+        run: brew install gmp
+
       - name: Install Windows compiler cache
         if: runner.os == 'Windows'
         shell: pwsh
@@ -99,17 +105,20 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: determinism-v2-${{ runner.os }}-${{ runner.arch }}-${{ matrix.profile }}-${{ hashFiles('scripts/determinism/run.py') }}-${{ github.sha }}
+          key: determinism-v2-${{ runner.os }}-${{ runner.arch }}-${{ env.PROFILE }}-${{ hashFiles('scripts/determinism/run.py') }}-${{ github.sha }}
           restore-keys: |
-            determinism-v2-${{ runner.os }}-${{ runner.arch }}-${{ matrix.profile }}-${{ hashFiles('scripts/determinism/run.py') }}-
+            determinism-v2-${{ runner.os }}-${{ runner.arch }}-${{ env.PROFILE }}-${{ hashFiles('scripts/determinism/run.py') }}-
 
       - name: Build Release solver and regression tests
         if: runner.os != 'Windows'
         run: |
           compilers=(--gcc g++-14 --clang clang++-18)
-          if [[ "$RUNNER_OS" == macOS ]]; then compilers=(--clang /usr/bin/clang++); fi
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            compilers=(--clang /usr/bin/clang++)
+            if [[ "$PROFILE" == *-gmp ]]; then compilers+=(--gmp-prefix "$(brew --prefix gmp)"); fi
+          fi
           python scripts/determinism/run.py build \
-            --profile '${{ matrix.profile }}' --work build/determinism \
+            --profile "$PROFILE" --work build/determinism \
             "${compilers[@]}" --sort-seed 1 --jobs "$(python -c 'import os; print(os.cpu_count() or 1)')"
 
       - name: Build Release solver and regression tests with MSVC
@@ -120,21 +129,31 @@ jobs:
           $installation = & $vswhere -latest -products '*' -version '[17.0,18.0)' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           if (!$installation) { throw 'Visual Studio 2022 C++ tools were not found' }
           & "$installation\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
-          python scripts/determinism/run.py build --profile msvc --work build/determinism --jobs $env:NUMBER_OF_PROCESSORS
+          $gmpArgs = @()
+          if ($env:PROFILE.EndsWith('-gmp')) {
+            $vcpkg = "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe"
+            $installed = "$env:GITHUB_WORKSPACE/build/determinism/vcpkg"
+            & $vcpkg version
+            # Static GMP with the same dynamic CRT as Z3; no extra runtime DLL.
+            & $vcpkg install gmp:x64-windows-static-md "--x-install-root=$installed"
+            if ($LASTEXITCODE -ne 0) { throw 'GMP installation failed' }
+            $gmpArgs = @('--gmp-prefix', "$installed/x64-windows-static-md")
+          }
+          python scripts/determinism/run.py build --profile $env:PROFILE --work build/determinism --jobs $env:NUMBER_OF_PROCESSORS @gmpArgs
 
       - name: Check arithmetic and run the corpus twice
         run: |
           executable=z3
           if [[ "$RUNNER_OS" == Windows ]]; then executable=z3.exe; fi
           python scripts/determinism/run.py run --suite z3test --out reports \
-            --binary '${{ matrix.profile }}=build/determinism/${{ matrix.profile }}/build/'"$executable" \
+            --binary "$PROFILE=build/determinism/$PROFILE/build/$executable" \
             --jobs "$(python -c 'import os; print(os.cpu_count() or 1)')"
 
       - name: Upload raw runs
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: determinism-runs-${{ matrix.profile }}
+          name: determinism-runs-${{ env.PROFILE }}
           path: reports
           if-no-files-found: warn
           retention-days: 7
@@ -143,10 +162,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: determinism-build-${{ matrix.profile }}
+          name: determinism-build-${{ env.PROFILE }}
           path: |
-            build/determinism/${{ matrix.profile }}/*.log
-            build/determinism/${{ matrix.profile }}/build.json
+            build/determinism/${{ env.PROFILE }}/*.log
+            build/determinism/${{ env.PROFILE }}/build.json
           if-no-files-found: warn
           retention-days: 7
 
@@ -174,7 +193,9 @@ jobs:
       - name: Compare repetitions and configurations
         run: |
           python3 scripts/determinism/run.py compare --input reports --out comparison \
-            --profiles gcc gcc-gmp gcc-unsigned-char clang libcxx libcxx-random apple-clang msvc
+            --profiles gcc gcc-gmp gcc-unsigned-char gcc-unsigned-char-gmp \
+              clang clang-gmp libcxx libcxx-gmp libcxx-random libcxx-random-gmp \
+              apple-clang apple-clang-gmp msvc msvc-gmp
 
       - name: Publish job summary
         if: always()

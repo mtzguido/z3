@@ -32,18 +32,16 @@ the corpus to preserve the same line endings on every OS. The workflow does this
 repositories. The PowerShell equivalent of reading the revision is
 `$revision = (Get-Content scripts/determinism/corpus.json -Raw | ConvertFrom-Json).revision`.
 
-On Linux, run all six configurations with a total of eight build jobs:
+On Linux, run all ten configurations with a total of eight build jobs:
 
 ```sh
 python3 scripts/determinism/run.py matrix \
   --suite ../z3test --gcc g++-14 --clang clang++-18 --jobs 8
 ```
 
-The configurations are:
+Each configuration has an internal-arithmetic profile and a `-gmp` counterpart:
 
 - `gcc`: GCC with libstdc++.
-- `gcc-gmp`: the same GCC with GMP integer arithmetic (`Z3_USE_LIB_GMP=ON`).
-  All other profiles use Z3's internal integer arithmetic.
 - `gcc-unsigned-char`: the same GCC with `-funsigned-char`, testing the opposite
   signedness from the default on the Linux x64 CI runner.
 - `clang`: Clang with the selected GCC's libstdc++ headers.
@@ -52,30 +50,38 @@ The configurations are:
 - `apple-clang`: macOS Apple Clang and the system libc++.
 - `msvc`: Windows MSVC and the Microsoft C++ standard library, using Ninja.
 
-The local default is the six Linux profiles on Linux, `apple-clang` on macOS,
-and `msvc` on Windows. For macOS, install Ninja and optionally ccache with Homebrew,
-then run:
+For example, `libcxx-random-gmp` combines randomized sorting with GMP
+(`Z3_USE_LIB_GMP=ON`). The local default runs both backends for all configurations
+available on that OS: ten profiles on Linux, two on macOS, and two on Windows.
+For macOS, install `ninja gmp` and optionally `ccache` with Homebrew, then run:
 
 ```sh
-python3 scripts/determinism/run.py matrix --suite ../z3test --clang /usr/bin/clang++
+python3 scripts/determinism/run.py matrix --suite ../z3test --clang /usr/bin/clang++ \
+  --gmp-prefix "$(brew --prefix gmp)"
 ```
 
 On Windows, use a **Developer PowerShell for Visual Studio 2022** targeting x64,
-with Python, CMake and Ninja on PATH:
+with Python, CMake and Ninja on PATH. Install GMP with vcpkg using its
+[static-library, dynamic-runtime triplet](https://github.com/microsoft/vcpkg/blob/master/triplets/x64-windows-static-md.cmake),
+matching Z3's defaults (`VCPKG_ROOT` is your vcpkg checkout):
 
 ```powershell
-python scripts/determinism/run.py matrix --suite ../z3test --profiles msvc
+vcpkg install gmp:x64-windows-static-md
+python scripts/determinism/run.py matrix --suite ../z3test `
+  --gmp-prefix "$env:VCPKG_ROOT/installed/x64-windows-static-md"
 ```
 
 `--msvc` selects another `cl.exe` path within that developer environment. Executable
 names, process termination, UTF-8 metadata and artifact paths are handled per OS.
 Reports from different machines can be copied into one directory and passed to
-`compare --profiles gcc gcc-gmp gcc-unsigned-char clang libcxx libcxx-random apple-clang msvc`; every named
-configuration must be present and use the same source, corpus and run settings.
+`compare --profiles ...` with all profile names to compare. Every named configuration
+must be present and use the same source, corpus and run settings.
 
 Compilers are configurable; `--gcc g++-16 --clang clang++-22` works on hosts
 with those versions. For a private libc++ installation, use `--libcxx-include`
 for its `include/c++/v1` directory and `--libcxx-lib` for its library directory.
+`--gmp-prefix` points to a GMP installation containing `include/` and `lib/`;
+it only affects GMP profiles. System installations on Linux are found automatically.
 
 Use `--profiles gcc clang` for a smaller matrix. Build directories and the
 compiler cache are reused under `build/determinism`; each run gets a new timestamped
@@ -183,7 +189,6 @@ some versions of that document.
 | Runner | Configuration |
 |---|---|
 | Ubuntu 24.04, x64 | GCC 14 / libstdc++ |
-| Ubuntu 24.04, x64 | GCC 14 / libstdc++ / GMP |
 | Ubuntu 24.04, x64 | GCC 14 / libstdc++, `-funsigned-char` |
 | Ubuntu 24.04, x64 | Clang 18 / libstdc++ |
 | Ubuntu 24.04, x64 | Clang 18 / libc++ 18 |
@@ -191,12 +196,14 @@ some versions of that document.
 | macOS 15, ARM64 | Apple Clang / system libc++ |
 | Windows Server 2022, x64 | Visual Studio 2022 MSVC / Microsoft STL |
 
-Each OS/configuration has its own compiler cache. The corpus revision is pinned.
+Every row runs with both internal and GMP arithmetic: 14 jobs, each running the
+104 inputs twice (2,912 solver runs). Every job also runs the arithmetic regressions.
+Each OS/configuration/backend has its own compiler cache. The corpus revision is pinned.
 Compiler/package updates within these runner images remain possible;
 compiler and host versions are recorded. macOS also adds ARM64 coverage, while
 Windows exercises its LLP64 data model and a different standard library.
 
-The Linux comparison job checks that all eight complete result sets exist, verifies their
+The Linux comparison job checks that all 14 complete result sets exist, verifies their
 provenance and output hashes, and fails on any difference beyond CRLF/LF line endings. It writes a job
 summary with expandable first differences and retains raw runs and build logs as
 artifacts. Fork PRs use the ordinary read-only `pull_request` workflow. Pushes to master also warm the caches

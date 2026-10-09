@@ -24,8 +24,9 @@ if os.name != 'nt':
     import resource
 
 HERE = Path(__file__).resolve().parent
-LINUX_PROFILES = ('gcc', 'gcc-gmp', 'gcc-unsigned-char', 'clang', 'libcxx', 'libcxx-random')
-PROFILES = (*LINUX_PROFILES, 'apple-clang', 'msvc')
+LINUX_CONFIGURATIONS = ('gcc', 'gcc-unsigned-char', 'clang', 'libcxx', 'libcxx-random')
+CONFIGURATIONS = (*LINUX_CONFIGURATIONS, 'apple-clang', 'msvc')
+PROFILES = tuple(p + suffix for p in CONFIGURATIONS for suffix in ('', '-gmp'))
 CHANNELS = ('ast.trace', 'stdout', 'stderr')
 MAX_FILE_BYTES = 128 * 1024 * 1024
 ARITHMETIC_TESTS = ('bigint', 'mpz', 'rational', 'mpq', 'mpbq', 'mpf', 'mpfx', 'mpff',
@@ -34,10 +35,12 @@ ARITHMETIC_TESTS = ('bigint', 'mpz', 'rational', 'mpq', 'mpbq', 'mpf', 'mpfx', '
 
 def default_profiles():
     if sys.platform == 'win32':
-        return ['msvc']
-    if sys.platform == 'darwin':
-        return ['apple-clang']
-    return list(LINUX_PROFILES)
+        configurations = ('msvc',)
+    elif sys.platform == 'darwin':
+        configurations = ('apple-clang',)
+    else:
+        configurations = LINUX_CONFIGURATIONS
+    return [p + suffix for p in configurations for suffix in ('', '-gmp')]
 
 
 def host_info():
@@ -71,31 +74,33 @@ def source_info(source):
 
 
 def build(args, profile, jobs):
-    if profile == 'msvc' and os.name != 'nt':
+    use_gmp = profile.endswith('-gmp')
+    configuration = profile.removesuffix('-gmp')
+    if configuration == 'msvc' and os.name != 'nt':
         raise ValueError('the msvc profile requires a Windows developer shell')
-    if profile == 'apple-clang' and sys.platform != 'darwin':
+    if configuration == 'apple-clang' and sys.platform != 'darwin':
         raise ValueError('the apple-clang profile requires macOS')
     directory = args.work.resolve() / profile
     directory.mkdir(parents=True, exist_ok=True)
     source = args.source.resolve()
-    selected = (args.msvc if profile == 'msvc' else
-                args.gcc if profile in ('gcc', 'gcc-gmp', 'gcc-unsigned-char') else args.clang)
+    selected = (args.msvc if configuration == 'msvc' else
+                args.gcc if configuration in ('gcc', 'gcc-unsigned-char') else args.clang)
     compiler = shutil.which(selected)
     if not compiler:
         raise ValueError(f'compiler not found for {profile}')
     # Forward slashes also avoid CMake escape sequences in Windows compiler paths.
     compiler = Path(compiler).as_posix()
     flags, link_flags = [], []
-    if profile == 'msvc':
+    if configuration == 'msvc':
         flags.append('/utf-8')
-    if profile == 'gcc-unsigned-char':
+    if configuration == 'gcc-unsigned-char':
         flags.append('-funsigned-char')
-    if profile == 'clang':
+    if configuration == 'clang':
         # Use the same libstdc++ headers as the selected GCC, even if a newer
         # GCC installation is also visible to Clang on this host.
         gcc_lib = output([args.gcc, '-print-libgcc-file-name'])
         flags.append('--gcc-install-dir=' + str(Path(gcc_lib).resolve().parent))
-    if profile.startswith('libcxx'):
+    if configuration.startswith('libcxx'):
         if args.libcxx_include:
             flags += ['-nostdinc++', '-isystem', str(args.libcxx_include.resolve())]
             link_flags.append('-stdlib=libc++')
@@ -104,20 +109,22 @@ def build(args, profile, jobs):
         if args.libcxx_lib:
             lib = str(args.libcxx_lib.resolve())
             link_flags += ['-L' + lib, '-Wl,-rpath,' + lib]
-        if profile == 'libcxx-random':
+        if configuration == 'libcxx-random':
             flags += ['-D_LIBCPP_DEBUG_RANDOMIZE_UNSPECIFIED_STABILITY',
                       '-D_LIBCPP_DEBUG_RANDOMIZE_UNSPECIFIED_STABILITY_SEED=' + str(args.sort_seed)]
     # Retain CMake's MSVC defaults, including /DWIN32 and /D_WINDOWS required by Z3.
-    flags_suffix = '_INIT' if profile == 'msvc' else ''
+    flags_suffix = '_INIT' if configuration == 'msvc' else ''
     command = ['cmake', '-S', str(source), '-B', str(directory / 'build'), '-G', 'Ninja',
                '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_CXX_STANDARD=20',
                '-DCMAKE_CXX_COMPILER=' + compiler,
                f'-DCMAKE_CXX_FLAGS{flags_suffix}=' + shlex.join(flags),
                f'-DCMAKE_EXE_LINKER_FLAGS{flags_suffix}=' + shlex.join(link_flags),
                '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON',
-               '-DZ3_USE_LIB_GMP=' + ('ON' if profile == 'gcc-gmp' else 'OFF'),
+               '-DZ3_USE_LIB_GMP=' + ('ON' if use_gmp else 'OFF'),
                '-DZ3_INCLUDE_GIT_HASH=OFF', '-DZ3_INCLUDE_GIT_DESCRIBE=OFF',
                '-DZ3_BUILD_TEST_EXECUTABLES=ON', '-DZ3_ENABLE_EXAMPLE_TARGETS=OFF']
+    if use_gmp and args.gmp_prefix:
+        command.append('-DCMAKE_PREFIX_PATH=' + args.gmp_prefix.resolve().as_posix())
     env = dict(os.environ, LC_ALL='C')
     if shutil.which('ccache'):
         command.append('-DCMAKE_CXX_COMPILER_LAUNCHER=' + Path(shutil.which('ccache')).as_posix())
@@ -125,13 +132,14 @@ def build(args, profile, jobs):
         env.setdefault('CCACHE_BASEDIR', str(source))
         env.setdefault('CCACHE_MAXSIZE', '1G')
     start = time.monotonic()
-    if profile == 'msvc':
+    if configuration == 'msvc':
         banner = output([compiler, '/?'], stderr=subprocess.STDOUT, errors='replace').splitlines()[0]
     else:
         banner = output([compiler, '--version'])
     metadata = {'profile': profile, 'source': source_info(source), 'host': host_info(),
+                'arithmetic': 'gmp' if use_gmp else 'internal',
                 'compiler': banner, 'configure_command': command,
-                'sort_seed': args.sort_seed if profile == 'libcxx-random' else None}
+                'sort_seed': args.sort_seed if configuration == 'libcxx-random' else None}
     # A stale success record must not survive a failed incremental rebuild.
     (directory / 'build.json').unlink(missing_ok=True)
     commands = [('configure', command), ('build', ['cmake', '--build', str(directory / 'build'),
@@ -426,6 +434,7 @@ def main():
             p.add_argument('--msvc', default='cl')
             p.add_argument('--libcxx-include', type=Path)
             p.add_argument('--libcxx-lib', type=Path)
+            p.add_argument('--gmp-prefix', type=Path, help='GMP installation prefix (include/ and lib/)')
             p.add_argument('--sort-seed', type=int, default=1)
         if name == 'build':
             p.add_argument('--profile', choices=PROFILES, required=True)
