@@ -19,6 +19,8 @@ Revision History:
 #include "util/hwf.h"
 #include "util/mpf.h"
 #include <iostream>
+#include <cfenv>
+#include <limits>
 
 static void tst1() {
     hwf_manager      hm;
@@ -69,7 +71,7 @@ static void tst_large_power() {
     f2n<M> m(fm);
     _scoped_numeral<f2n<M>> a(m), result(m), expected(m);
     for (unsigned exponent : {0u, 1u, unsigned(INT_MAX), unsigned(INT_MAX) + 1, UINT_MAX}) {
-        for (int base : {-1, 1}) {
+        for (int base : {-1, 0, 1}) {
             m.set(a, base);
             m.set(expected, exponent == 0 || (base == -1 && exponent % 2 == 0) ? 1 : base);
             m.power(a, exponent, result);
@@ -80,9 +82,49 @@ static void tst_large_power() {
     }
 }
 
+template<typename M>
+static void tst_zero() {
+    M fm;
+    f2n<M> m(fm);
+    _scoped_numeral<f2n<M>> a(m), b(m);
+    for (bool upward : {false, true}) {
+        m.set_rounding(upward);
+        for (double value : {-0.0, 0.0}) {
+            m.set(a, value);
+            m.set(b, a);
+            ENSURE(m.is_zero(b));
+            m.floor(a, b);
+            ENSURE(m.is_zero(b));
+            m.ceil(a, b);
+            ENSURE(m.is_zero(b));
+        }
+        m.set(a, 1);
+        m.sub(a, a, b);
+        ENSURE(m.is_zero(b));
+        m.set(a, 1, 3);
+        m.floor(a, b);
+        ENSURE(m.is_zero(b));
+        m.neg(a);
+        m.ceil(a, b);
+        ENSURE(m.is_zero(b));
+    }
+    for (double value : {std::numeric_limits<double>::infinity(),
+                         -std::numeric_limits<double>::infinity(),
+                         std::numeric_limits<double>::quiet_NaN()}) {
+        bool caught = false;
+        try { m.set(a, value); }
+        catch (typename f2n<M>::exception const&) { caught = true; }
+        ENSURE(caught);
+    }
+}
+
 void tst_f2n() {
+    int rounding = std::fegetround();
+    tst_zero<mpf_manager>();
+    tst_zero<hwf_manager>();
     tst_large_power<mpf_manager>();
     tst_large_power<hwf_manager>();
     tst1();
     tst2();
+    std::fesetround(rounding);
 }

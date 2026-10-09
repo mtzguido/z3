@@ -35,7 +35,9 @@ private:
     numeral           m_tmp1;
     numeral           m_one;
     
-    void check(numeral const & n) { if (!m().is_regular(n)) throw exception(); }
+    // mpf's regular values exclude zero; both signed zeros are valid numerals.
+    bool is_finite(numeral const& n) const { return m().is_regular(n) || m().is_zero(n); }
+    void check(numeral const & n) { if (!is_finite(n)) throw exception(); }
 
 public:
     static bool field() { return true; }
@@ -133,13 +135,13 @@ public:
     // Store the floor of a into b. Return true if a is an integer.
     // Throws an exception if the result cannot be computed precisely.
     void floor(numeral const & a, numeral & b) {
-        SASSERT(m().is_regular(a));
+        SASSERT(is_finite(a));
         // Claim: If a is a regular float, then floor(a) is an integer that can be precisely represented.
         // Justification: (for the case a is nonnegative)
         //       If 0 <= a  > 2^sbits(), then a is an integer, and floor(a) == a
         //       If 0 <= a <= 2^sbits(), then floor(a) is representable since every integer less than 2^sbit
         m().round_to_integral(MPF_ROUND_TOWARD_NEGATIVE, a, m_tmp1);
-        SASSERT(m().is_regular(m_tmp1));
+        SASSERT(is_finite(m_tmp1));
         if (m().le(m_tmp1, a)) {
             m().set(b, m_tmp1);
         }
@@ -147,14 +149,14 @@ public:
             // the rounding mode doesn't matter for the following operation.
             m().sub(MPF_ROUND_TOWARD_NEGATIVE, m_tmp1, m_one, b);
         }
-        SASSERT(m().is_regular(b));
+        SASSERT(is_finite(b));
     }
 
     void ceil(numeral const & a, numeral & b) {
-        SASSERT(m().is_regular(a));
+        SASSERT(is_finite(a));
         // See comment in floor
         m().round_to_integral(MPF_ROUND_TOWARD_POSITIVE, a, m_tmp1);
-        SASSERT(m().is_regular(m_tmp1));
+        SASSERT(is_finite(m_tmp1));
         if (m().ge(m_tmp1, a)) {
             m().set(b, m_tmp1);
         }
@@ -162,7 +164,7 @@ public:
             // the rounding mode doesn't matter for the following operation.
             m().add(MPF_ROUND_TOWARD_NEGATIVE, m_tmp1, m_one, b);
         }
-        SASSERT(m().is_regular(b));
+        SASSERT(is_finite(b));
     }
 
     unsigned prev_power_of_two(numeral const & a) { return m().prev_power_of_two(a); }

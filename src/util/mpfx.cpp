@@ -447,6 +447,8 @@ void mpfx_manager::mul(mpfx const & a, mpfx const & b, mpfx & c) {
         unsigned * w_c = words(c);
         for (unsigned i = 0; i < m_total_sz; ++i)
             w_c[i] = _r[i];
+        if (::is_zero(m_total_sz, w_c))
+            reset(c);
     }
     STRACE(mpfx_trace, display(tout, c); tout << "\n";);  
     SASSERT(check(c));
@@ -545,6 +547,7 @@ void mpfx_manager::div2k(mpfx & a, unsigned k) {
 }
 
 void mpfx_manager::set_epsilon(mpfx & n) {
+    allocate_if_needed(n);
     unsigned * w = words(n);
     w[0] = 1;
     for (unsigned i = 1; i < m_total_sz; ++i)

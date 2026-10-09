@@ -122,7 +122,35 @@ static void tst_power() {
     ENSURE(narrow.get_uint64(result32) == 43046721);
 }
 
+static void tst_rounded_zero() {
+    mpfx_manager m(1, 1);
+    scoped_mpfx a(m), b(m), result(m), zero(m);
+    m.set_plus_epsilon(a);
+    ENSURE(!m.is_zero(a));
+    ENSURE(m.is_zero(zero));
+    ENSURE(m.is_int(zero));
+    m.set_minus_epsilon(b);
+    ENSURE(m.is_neg(b));
+    ENSURE(m.is_zero(zero));
+    for (bool negative : {false, true}) {
+        m.set_rounding(negative);
+        for (unsigned alias : {0u, 1u, 2u}) {
+            m.set(a, 1);
+            m.div2k(a, 32);
+            m.set(b, a);
+            if (negative)
+                m.neg(b);
+            auto& out = alias == 1 ? a.get() : alias == 2 ? b.get() : result.get();
+            m.mul(a, b, out);
+            ENSURE(m.is_zero(out));
+            ENSURE(!m.is_neg(out));
+            ENSURE(m.eq(out, zero));
+        }
+    }
+}
+
 void tst_mpfx() {
+    tst_rounded_zero();
     tst_power();
     tst_native_integers();
     tst_prev_power_2();
