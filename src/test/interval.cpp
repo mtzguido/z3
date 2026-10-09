@@ -452,7 +452,40 @@ static void tst_pi_float() {
 #define SMALL_MAG 3
 #define MID_MAG   10
 
+static void tst_directed_power() {
+    mpf_manager fm;
+    reslimit limit;
+    interval_manager<im_float_config<mpf_manager>> im(limit, im_float_config<mpf_manager>(fm));
+    im_float_config<mpf_manager>::interval a, result;
+    unsynch_mpq_manager qm;
+    scoped_mpq input(qm), exact(qm), lo(qm), hi(qm);
+    for (bool upward : {false, true}) {
+        for (int numerator : {-1, 1}) {
+            for (int denominator : {3, 17}) {
+                for (unsigned exponent : {3u, 5u, 9u}) {
+                    for (bool alias : {false, true}) {
+                        im.m().set_rounding(upward);
+                        im.m().set(a.m_lower, numerator, denominator);
+                        im.m().set(a.m_upper, a.m_lower);
+                        fm.to_rational(a.m_lower, input);
+                        qm.power(input, exponent, exact);
+                        auto& out = alias ? a : result;
+                        im.power(a, exponent, out);
+                        fm.to_rational(out.m_lower, lo);
+                        fm.to_rational(out.m_upper, hi);
+                        // Even a singleton input generally needs two rounded endpoints.
+                        ENSURE(qm.le(lo, exact) && qm.le(exact, hi));
+                    }
+                }
+            }
+        }
+    }
+    im.del(a);
+    im.del(result);
+}
+
 void tst_interval() {
+    tst_directed_power();
     // enable_trace("interval_bug");
     // tst_float();
     // return;
