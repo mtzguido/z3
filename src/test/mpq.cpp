@@ -19,11 +19,16 @@ Revision History:
 
 #include "util/mpq.h"
 #include "util/mpq_inf.h"
+#include "util/mpff.h"
+#include "util/mpfx.h"
+#include "util/f2n.h"
+#include "util/hwf.h"
 #include "util/rational.h"
 #include "util/timeit.h"
 #include "util/z3_exception.h"
 #include <iostream>
 #include <cmath>
+#include <cfenv>
 #include <limits>
 
 static void tst0() {
@@ -435,7 +440,49 @@ static void tst_infinitesimal_rounding() {
     }
 }
 
+template<typename M, typename ToRational>
+static void tst_directed_powers(M& m, ToRational to_rational) {
+    _scoped_numeral<M> a(m), saved(m), result(m);
+    unsynch_mpq_manager qm;
+    scoped_mpq input(qm), exact(qm), actual(qm);
+    for (bool upward : {false, true}) {
+        m.set_rounding(upward);
+        for (int numerator : {-15, -3, -1, 1, 3, 15}) {
+            for (unsigned denominator : {3u, 7u, 17u}) {
+                for (unsigned exponent : {2u, 3u, 4u, 5u, 9u, 12u}) {
+                    m.set(saved, numerator, denominator);
+                    to_rational(saved, input);
+                    qm.power(input, exponent, exact);
+                    for (bool alias : {false, true}) {
+                        m.set(a, saved);
+                        auto& output = alias ? a.get() : result.get();
+                        m.power(a, exponent, output);
+                        to_rational(output, actual);
+                        ENSURE(upward ? qm.ge(actual, exact) : qm.le(actual, exact));
+                    }
+                }
+            }
+        }
+    }
+}
+
+static void tst_directed_powers() {
+    int rounding = std::fegetround();
+    mpff_manager ff;
+    tst_directed_powers(ff, [&](mpff const& n, scoped_mpq& q) { ff.to_mpq(n, q.m(), q); });
+    mpfx_manager fx;
+    tst_directed_powers(fx, [&](mpfx const& n, scoped_mpq& q) { fx.to_mpq(n, q.m(), q); });
+    mpf_manager fm;
+    f2n<mpf_manager> f(fm);
+    tst_directed_powers(f, [&](mpf const& n, scoped_mpq& q) { fm.to_rational(n, q); });
+    hwf_manager hm;
+    f2n<hwf_manager> h(hm);
+    tst_directed_powers(h, [&](hwf const& n, scoped_mpq& q) { hm.to_rational(n, q); });
+    std::fesetround(rounding);
+}
+
 void tst_mpq() {
+    tst_directed_powers();
     tst_infinitesimal_rounding<false>();
     tst_infinitesimal_rounding<true>();
     tst_set_component_aliases<false>();

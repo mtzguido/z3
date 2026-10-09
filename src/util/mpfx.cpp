@@ -613,7 +613,21 @@ void mpfx_manager::power(mpfx const & a, unsigned p, mpfx & b) {
 #endif
 #define SMALL_POWER 8
     SASSERT(check(a));
-    if (is_zero(a)) {
+    if (is_neg(a)) {
+        scoped_mpfx magnitude(*this);
+        set(magnitude, a);
+        neg(magnitude);
+        bool negative = p % 2 != 0;
+        {
+            // Rounding intermediate negative products in one direction does
+            // not bound their power. Compute the magnitude, then restore its sign.
+            flet<bool> rounding(m_to_plus_inf, negative ? !m_to_plus_inf : m_to_plus_inf);
+            power(magnitude, p, b);
+        }
+        if (negative)
+            neg(b);
+    }
+    else if (is_zero(a)) {
         SASSERT(p != 0);
         reset(b);
     }

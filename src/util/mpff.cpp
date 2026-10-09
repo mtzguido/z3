@@ -1003,7 +1003,21 @@ void mpff_manager::power(mpff const & a, unsigned p, mpff & b) {
 #endif
 #define SMALL_POWER 8
     SASSERT(check(a));
-    if (is_zero(a)) {
+    if (is_neg(a)) {
+        scoped_mpff magnitude(*this);
+        set(magnitude, a);
+        neg(magnitude);
+        bool negative = p % 2 != 0;
+        {
+            // All products must have the same monotonicity. Negating an odd
+            // power reverses the bound, so round its positive magnitude oppositely.
+            flet<bool> rounding(m_to_plus_inf, negative ? !m_to_plus_inf : m_to_plus_inf);
+            power(magnitude, p, b);
+        }
+        if (negative)
+            neg(b);
+    }
+    else if (is_zero(a)) {
         SASSERT(p != 0);
         reset(b);
     }

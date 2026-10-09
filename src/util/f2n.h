@@ -98,17 +98,35 @@ public:
     void dec(numeral & x) { sub(x, m_one, x); }
 
     void power(numeral const & a, unsigned p, numeral & b) {
-        numeral power;
-        set(power, a);
+        if (is_neg(a)) {
+            _scoped_numeral<f2n> magnitude(*this);
+            set(magnitude, a);
+            neg(magnitude);
+            bool negative = p % 2 != 0;
+            mpf_rounding_mode mode = m_mode;
+            if (negative && mode == MPF_ROUND_TOWARD_POSITIVE)
+                mode = MPF_ROUND_TOWARD_NEGATIVE;
+            else if (negative && mode == MPF_ROUND_TOWARD_NEGATIVE)
+                mode = MPF_ROUND_TOWARD_POSITIVE;
+            {
+                // Negating an odd power reverses a directed bound.
+                flet<mpf_rounding_mode> rounding(m_mode, mode);
+                power(magnitude, p, b);
+            }
+            if (negative)
+                neg(b);
+            return;
+        }
+        _scoped_numeral<f2n> pw(*this);
+        set(pw, a);
         set(b, 1);
         while (p != 0) {
             if (p & 1)
-                mul(b, power, b);
+                mul(b, pw, b);
             p >>= 1;
             if (p != 0)
-                mul(power, power, power);
+                mul(pw, pw, pw);
         }
-        del(power);
         check(b);
     }
     
