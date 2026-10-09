@@ -28,7 +28,8 @@ LINUX_PROFILES = ('gcc', 'gcc-gmp', 'gcc-unsigned-char', 'clang', 'libcxx', 'lib
 PROFILES = (*LINUX_PROFILES, 'apple-clang', 'msvc')
 CHANNELS = ('ast.trace', 'stdout', 'stderr')
 MAX_FILE_BYTES = 128 * 1024 * 1024
-ARITHMETIC_TESTS = ('bigint', 'mpz', 'rational', 'mpq', 'mpbq', 'mpf', 'mpfx', 'mpff', 'fpa', 'api')
+ARITHMETIC_TESTS = ('bigint', 'mpz', 'rational', 'mpq', 'mpbq', 'mpf', 'mpfx', 'mpff',
+                    'hwf', 'f2n', 'interval', 'rcf', 'fpa', 'api')
 
 
 def default_profiles():

@@ -102,7 +102,8 @@ python3 scripts/determinism/run.py compare --input /tmp/z3-runs \
 ## What is checked
 
 Before the SMT corpus, every configuration runs `test-z3 /seq` with the
-`bigint`, `mpz`, `rational`, `mpq`, `mpbq`, `mpf`, `mpfx`, `mpff`, `fpa`, and `api`
+`bigint`, `mpz`, `rational`, `mpq`, `mpbq`, `mpf`, `mpfx`, `mpff`, `hwf`, `f2n`,
+`interval`, `rcf`, `fpa`, and `api`
 groups. These cover the arithmetic/API regressions, including aliasing and storage
 histories that SMT-LIB cannot express. A failure or 120-second timeout stops the run.
 Output is saved in `arithmetic-tests.log`; it includes timings and is not compared.
