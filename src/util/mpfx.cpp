@@ -283,23 +283,28 @@ void mpfx_manager::set_core(mpfx & n, mpq_manager<SYNCH> & m, mpq const & v) {
         set_core(n, m, v.numerator());
     }
     else {
-        allocate_if_needed(n);
         _scoped_numeral<mpz_manager<SYNCH> > tmp(m);
-        n.m_sign = is_neg(n);
+        bool negative = m.is_neg(v);
         m.mul2k(v.numerator(), 8 * sizeof(unsigned) * m_frac_part_sz, tmp);
         m.abs(tmp);
-        if ((n.m_sign == 1) != m_to_plus_inf && !m.divides(v.denominator(), tmp)) {
+        if (negative != m_to_plus_inf && !m.divides(v.denominator(), tmp)) {
             m.div(tmp, v.denominator(), tmp);
             m.inc(tmp);
         }
         else {
             m.div(tmp, v.denominator(), tmp);
         }
+        if (m.is_zero(tmp)) {
+            reset(n);
+            return;
+        }
         m_tmp_digits.reset();
         m.decompose(tmp, m_tmp_digits);
         auto sz = m_tmp_digits.size();
         if (sz > m_total_sz)
             throw overflow_exception();
+        allocate_if_needed(n);
+        n.m_sign = negative;
         unsigned * w = words(n);
         ::copy(sz, m_tmp_digits.data(), m_total_sz, w);
     }

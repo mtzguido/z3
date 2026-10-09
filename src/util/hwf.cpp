@@ -110,8 +110,11 @@ void hwf_manager::set(hwf & o, float value) {
 }
 
 void hwf_manager::set(hwf & o, mpf_rounding_mode rm, mpq const & value) {
-    set_rounding_mode(rm);
-    o.value = m_mpq_manager.get_double(value);
+    // Converting numerator and denominator separately does not preserve a directed bound.
+    mpf_manager fm;
+    scoped_mpf rounded(fm);
+    fm.set(rounded, 11, 53, rm, value);
+    o.value = fm.to_double(rounded);
 }
 
 void hwf_manager::set(hwf & o, mpf_rounding_mode rm, char const * value) {
@@ -128,10 +131,10 @@ void hwf_manager::set(hwf & o, mpf_rounding_mode rm, char const * value) {
 
     TRACE(mpf_dbg, tout << " f = " << f << " e = " << e << std::endl;);
 
-    mpq q;
+    scoped_mpq q(m_mpq_manager);
     m_mpq_manager.set(q, f.c_str());
 
-    mpz ex;
+    scoped_mpz ex(m_mpz_manager);
     m_mpz_manager.set(ex, e.c_str());
 
     set(o, rm, q, ex);
@@ -140,27 +143,11 @@ void hwf_manager::set(hwf & o, mpf_rounding_mode rm, char const * value) {
 }
 
 void hwf_manager::set(hwf & o, mpf_rounding_mode rm, mpq const & significand, mpz const & exponent) {
-    // Assumption: this represents significand * 2^exponent.
-    set_rounding_mode(rm);
-
-    mpq sig;
-    m_mpq_manager.set(sig, significand);
-    int64_t exp = m_mpz_manager.get_int64(exponent);
-
-    if (m_mpq_manager.is_zero(significand))
-        o.value = 0.0;
-    else
-    {
-        while (m_mpq_manager.lt(sig, 1))
-        {
-            m_mpq_manager.mul(sig, 2, sig);
-            exp--;
-        }
-
-        hwf s; s.value = m_mpq_manager.get_double(sig);
-        uint64_t r = (RAW(s.value) & 0x800FFFFFFFFFFFFFull) | ((exp + 1023) << 52);
-        o.value = DBL(r);
-    }
+    // Normalize and round significand * 2^exponent before encoding the hardware value.
+    mpf_manager fm;
+    scoped_mpf rounded(fm);
+    fm.set(rounded, 11, 53, rm, exponent, significand);
+    o.value = fm.to_double(rounded);
 }
 
 void hwf_manager::set(hwf & o, bool sign, uint64_t significand, int exponent) {

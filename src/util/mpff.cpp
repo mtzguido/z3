@@ -352,7 +352,8 @@ void mpff_manager::set_core(mpff & n, mpz_manager<SYNCH> & m, mpz const & v) {
         unsigned w_sz = w.size();
         SASSERT(w_sz >= m_precision);
         unsigned num_leading_zeros = nlz(w_sz, w.data());
-        shl(w_sz, w.data(), num_leading_zeros, w_sz, w.data());
+        if (num_leading_zeros != 0)
+            shl(w_sz, w.data(), num_leading_zeros, w_sz, w.data());
         unsigned * s = sig(n);
         unsigned i = m_precision;
         unsigned j = w_sz;
@@ -394,7 +395,8 @@ void mpff_manager::set_core(mpff & n, mpq_manager<SYNCH> & m, mpq const & v) {
     scoped_mpff num(*this), den(*this);
     set_core(num, m, v.numerator());
     {
-        flet<bool> l(m_to_plus_inf, !m_to_plus_inf);
+        // Increasing the denominator increases a negative quotient, but decreases a positive one.
+        flet<bool> l(m_to_plus_inf, m.is_neg(v) ? m_to_plus_inf : !m_to_plus_inf);
         set_core(den, m, v.denominator());
     }
     div(num, den, n);

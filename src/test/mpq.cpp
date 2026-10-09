@@ -481,7 +481,73 @@ static void tst_directed_powers() {
     std::fesetround(rounding);
 }
 
+template<typename Convert>
+static void tst_directed_conversion(Convert convert) {
+    unsynch_mpq_manager m;
+    scoped_mpz large(m), numerator(m), denominator(m);
+    scoped_mpq input(m), actual(m);
+    for (unsigned bits : {53u, 64u, 65u, 127u, 128u, 200u, 1024u, 1030u}) {
+        m.set(large, 1);
+        m.mul2k(large, bits);
+        for (int n : {1, 3, 5, 7}) {
+            for (int d : {1, 3, 9, 17}) {
+                m.add(large, mpz(n), numerator);
+                m.add(large, mpz(d), denominator);
+                for (bool negative : {false, true}) {
+                    m.set(input, numerator, denominator);
+                    if (negative)
+                        m.neg(input);
+                    for (bool upward : {false, true}) {
+                        convert(m, input, upward, actual);
+                        ENSURE(upward ? m.ge(actual, input) : m.le(actual, input));
+                    }
+                }
+            }
+        }
+    }
+}
+
+static void tst_directed_conversions() {
+    mpff_manager ff;
+    scoped_mpff fv(ff);
+    tst_directed_conversion([&](unsynch_mpq_manager& m, mpq const& q, bool up, mpq& actual) {
+        ff.set_rounding(up);
+        ff.set(fv, m, q);
+        ff.to_mpq(fv, m, actual);
+    });
+    mpfx_manager fx;
+    scoped_mpfx xv(fx);
+    tst_directed_conversion([&](unsynch_mpq_manager& m, mpq const& q, bool up, mpq& actual) {
+        fx.set_rounding(up);
+        fx.set(xv, m, q);
+        fx.to_mpq(xv, m, actual);
+    });
+    hwf_manager hm;
+    hwf hv;
+    tst_directed_conversion([&](unsynch_mpq_manager& m, mpq const& q, bool up, mpq& actual) {
+        hm.set(hv, up ? MPF_ROUND_TOWARD_POSITIVE : MPF_ROUND_TOWARD_NEGATIVE, q);
+        hm.to_rational(hv, m, actual);
+    });
+
+    unsynch_mpq_manager m;
+    scoped_mpz denominator(m);
+    scoped_mpq tiny(m);
+    m.set(denominator, 1);
+    m.mul2k(denominator, 200);
+    for (int sign : {-1, 1}) {
+        m.set(tiny, mpz(sign), denominator);
+        fx.set_rounding(sign < 0);
+        for (int previous : {-1, 0, 1}) {
+            fx.set(xv, previous);
+            fx.set(xv, m, tiny);
+            ENSURE(fx.is_zero(xv));
+            ENSURE(!fx.is_neg(xv));
+        }
+    }
+}
+
 void tst_mpq() {
+    tst_directed_conversions();
     tst_directed_powers();
     tst_infinitesimal_rounding<false>();
     tst_infinitesimal_rounding<true>();
